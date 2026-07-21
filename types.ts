@@ -85,6 +85,7 @@ export interface InvoiceSettings {
 
 export interface PaymentSettings {
   razorpayKeyId: string;
+  merchantUpiId?: string;
 }
 
 export interface BrandAssets {

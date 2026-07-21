@@ -22,7 +22,7 @@ app.post("/api/create-order", async (req, res) => {
     return res.status(400).json({ error: "Amount must be at least 100 paise" });
   }
 
-  const keyId = process.env.RAZORPAY_KEY_ID || "rzp_test_TG67jxp1pHTgMB";
+  const keyId = process.env.RAZORPAY_KEY_ID || "rzp_test_TG8tR9LgCQuTng";
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
   if (!keyId || !keySecret) {

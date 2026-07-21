@@ -118,7 +118,8 @@ const DEFAULT_INVOICE_SETTINGS: InvoiceSettings = {
 };
 
 const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
-  razorpayKeyId: 'rzp_test_TG67jxp1pHTgMB'
+  razorpayKeyId: 'rzp_test_TG8tR9LgCQuTng',
+  merchantUpiId: 'amritassamtea@okaxis'
 };
 
 const DEFAULT_BRAND_ASSETS: BrandAssets = {
@@ -227,6 +228,15 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
           const { data, error } = await supabase.from('site_settings').select('*').eq('id', 1).single();
           
           if (data) {
+             // Extract UPI ID from footer_note if present
+             let footerRaw = data.footer_note || DEFAULT_INVOICE_SETTINGS.footerNote;
+             let customUpi = 'amritassamtea@okaxis';
+             const upiMatch = footerRaw.match(/\[UPI:([^\]]+)\]/);
+             if (upiMatch) {
+                 customUpi = upiMatch[1];
+             }
+             const displayFooter = footerRaw.replace(/\[UPI:[^\]]+\]/, "").trim();
+
              // Map DB to State
              setInvoiceSettings({
                  companyName: data.company_name || DEFAULT_INVOICE_SETTINGS.companyName,
@@ -235,16 +245,17 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
                  addressLine2: data.address_line_2 || DEFAULT_INVOICE_SETTINGS.addressLine2,
                  gstin: data.gstin || DEFAULT_INVOICE_SETTINGS.gstin,
                  phone: data.phone || DEFAULT_INVOICE_SETTINGS.phone,
-                 footerNote: data.footer_note || DEFAULT_INVOICE_SETTINGS.footerNote
+                 footerNote: displayFooter
              });
              let rzpKey = data.razorpay_key_id || DEFAULT_PAYMENT_SETTINGS.razorpayKeyId;
-             if (rzpKey === 'rzp_test_1DP5mmOlF5G5ag' || rzpKey === 'rzp_test_TG637ITm48z8Ra' || rzpKey === 'rzp_test_TB2Phw7nWzv1u8') {
-                 rzpKey = 'rzp_test_TG67jxp1pHTgMB';
+             if (rzpKey === 'rzp_test_1DP5mmOlF5G5ag' || rzpKey === 'rzp_test_TG637ITm48z8Ra' || rzpKey === 'rzp_test_TB2Phw7nWzv1u8' || rzpKey === 'rzp_test_TG67jxp1pHTgMB') {
+                 rzpKey = 'rzp_test_TG8tR9LgCQuTng';
                  // Self-heal DB: update stale or default database values asynchronously
                  supabase.from('site_settings').update({ razorpay_key_id: rzpKey }).eq('id', 1).then();
              }
              setPaymentSettings({
-                 razorpayKeyId: rzpKey
+                 razorpayKeyId: rzpKey,
+                 merchantUpiId: customUpi
              });
              setBrandAssets({
                  logo: data.logo || null,
@@ -648,6 +659,8 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
 
   const updateInvoiceSettings = async (settings: InvoiceSettings) => {
     setInvoiceSettings(settings); // Optimistic Update
+    const currentUpi = paymentSettings.merchantUpiId || 'amritassamtea@okaxis';
+    const dbFooter = `${settings.footerNote.replace(/\[UPI:[^\]]+\]/, "").trim()} [UPI:${currentUpi}]`;
     await supabase.from('site_settings').update({
         company_name: settings.companyName,
         email: settings.email,
@@ -655,14 +668,17 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
         address_line_2: settings.addressLine2,
         gstin: settings.gstin,
         phone: settings.phone,
-        footer_note: settings.footerNote
+        footer_note: dbFooter
     }).eq('id', 1);
   };
   
   const updatePaymentSettings = async (settings: PaymentSettings) => {
     setPaymentSettings(settings); // Optimistic Update
+    const cleanFooter = invoiceSettings.footerNote.replace(/\[UPI:[^\]]+\]/, "").trim();
+    const dbFooter = `${cleanFooter} [UPI:${settings.merchantUpiId || 'amritassamtea@okaxis'}]`;
     await supabase.from('site_settings').update({
-        razorpay_key_id: settings.razorpayKeyId
+        razorpay_key_id: settings.razorpayKeyId,
+        footer_note: dbFooter
     }).eq('id', 1);
   };
 

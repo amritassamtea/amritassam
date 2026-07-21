@@ -289,8 +289,16 @@ const CartDrawer = ({ isOpen, onClose, onCheckout }: { isOpen: boolean, onClose:
 const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
   const { cart, user, placeOrder, paymentSettings } = useStore();
   const [step, setStep] = useState(1);
-  const [address, setAddress] = useState(user?.address || '');
-  const [payment, setPayment] = useState<'UPI' | 'Card' | 'COD'>('UPI');
+  const [street, setStreet] = useState(user?.address || '');
+  const [city, setCity] = useState('');
+  const [stateName, setStateName] = useState('Assam');
+  const [zip, setZip] = useState('');
+  const [payment, setPayment] = useState<'UPI' | 'Card' | 'COD' | 'MANUAL_UPI'>('UPI');
+  const [customerUpi, setCustomerUpi] = useState('');
+  const [utrNumber, setUtrNumber] = useState('');
+  const [upiMethod, setUpiMethod] = useState<'qr' | 'direct'>('qr');
+
+  const address = street ? `${street.trim()}, ${city.trim()}, ${stateName.trim()} - ${zip.trim()}` : '';
 
   const total = cart.reduce((acc, item) => {
     const price = user?.role === 'DISTRIBUTOR' ? item.distributorPrice : item.mrp;
@@ -298,8 +306,20 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
   }, 0);
 
   const handlePlaceOrder = async () => {
-    if(!address) {
-      alert("Address is required");
+    if(!street.trim()) {
+      alert("Please enter street address / house number.");
+      return;
+    }
+    if(!city.trim()) {
+      alert("Please enter city / town.");
+      return;
+    }
+    if(!stateName.trim()) {
+      alert("Please select state.");
+      return;
+    }
+    if(!zip.trim() || zip.trim().length !== 6 || !/^\d{6}$/.test(zip.trim())) {
+      alert("Please enter a valid 6-digit PIN Code.");
       return;
     }
 
@@ -307,6 +327,27 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
       try {
         await placeOrder(payment, address, 'Pending');
         alert(`Order Placed Successfully! Payment to be collected on delivery.`);
+        onOrderPlaced();
+      } catch (err: any) {
+        alert("Failed to place order: " + (err.message || err));
+      }
+    } else if (payment === 'MANUAL_UPI') {
+      if (!customerUpi.trim()) {
+        alert("Please enter your UPI ID or Mobile Number used for payment.");
+        return;
+      }
+      if (!utrNumber.trim()) {
+        alert("Please enter the 12-digit UPI Ref No. (UTR) / Transaction ID.");
+        return;
+      }
+      if (utrNumber.trim().length < 6) {
+        alert("Please enter a valid Transaction ID / UTR.");
+        return;
+      }
+      try {
+        const transId = `Manual UPI - UTR: ${utrNumber.trim()} (Paid from: ${customerUpi.trim()})`;
+        await placeOrder('UPI', address, 'Pending', transId);
+        alert(`Order Placed Successfully! Your transaction ID is saved. Admin will verify the payment and process your order.`);
         onOrderPlaced();
       } catch (err: any) {
         alert("Failed to place order: " + (err.message || err));
@@ -462,19 +503,83 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
       <div className="bg-white p-6 rounded shadow-lg">
         {step === 1 ? (
           <div>
-            <h3 className="font-bold mb-4">Shipping Address</h3>
-            <textarea 
-              className="w-full border rounded p-3 h-32 mb-4"
-              placeholder="Enter full address..."
-              value={address}
-              onChange={e => setAddress(e.target.value)}
-            ></textarea>
+            <h3 className="font-bold mb-4 text-tea-dark text-lg border-b pb-2">Shipping Address</h3>
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1">Street Address / House No. / Landmark</label>
+                <input 
+                  type="text" 
+                  className="w-full border rounded p-3 text-sm focus:ring-2 focus:ring-tea-green outline-none" 
+                  placeholder="e.g. Ward No. 5, Near Tea Garden Road"
+                  value={street}
+                  onChange={e => setStreet(e.target.value)}
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">City / Town</label>
+                  <input 
+                    type="text" 
+                    className="w-full border rounded p-3 text-sm focus:ring-2 focus:ring-tea-green outline-none" 
+                    placeholder="e.g. Dibrugarh"
+                    value={city}
+                    onChange={e => setCity(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">State</label>
+                  <select 
+                    className="w-full border rounded p-3 text-sm focus:ring-2 focus:ring-tea-green bg-white outline-none" 
+                    value={stateName}
+                    onChange={e => setStateName(e.target.value)}
+                  >
+                    <option value="">Select State</option>
+                    {[
+                      "Assam", "West Bengal", "Delhi", "Maharashtra", "Karnataka", "Tamil Nadu", 
+                      "Uttar Pradesh", "Bihar", "Rajasthan", "Madhya Pradesh", "Gujarat", "Haryana", 
+                      "Punjab", "Kerala", "Andhra Pradesh", "Telangana", "Odisha", "Jharkhand", 
+                      "Chhattisgarh", "Uttarakhand", "Himachal Pradesh", "Jammu & Kashmir", "Goa", 
+                      "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Sikkim", "Tripura", "Arunachal Pradesh"
+                    ].map(st => <option key={st} value={st}>{st}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">PIN Code (ZIP Code)</label>
+                  <input 
+                    type="text" 
+                    maxLength={6}
+                    className="w-full border rounded p-3 text-sm font-mono focus:ring-2 focus:ring-tea-green outline-none" 
+                    placeholder="e.g. 786001"
+                    value={zip}
+                    onChange={e => {
+                      const val = e.target.value.replace(/\D/g, '');
+                      setZip(val);
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
              <button 
               onClick={() => {
-                if(!address) alert("Address is required");
-                else setStep(2);
+                if(!street.trim()) {
+                  alert("Please enter street address / house number.");
+                  return;
+                }
+                if(!city.trim()) {
+                  alert("Please enter city / town.");
+                  return;
+                }
+                if(!stateName.trim()) {
+                  alert("Please select your state.");
+                  return;
+                }
+                if(!zip.trim() || zip.trim().length !== 6 || !/^\d{6}$/.test(zip.trim())) {
+                  alert("Please enter a valid 6-digit PIN Code (ZIP).");
+                  return;
+                }
+                setStep(2);
               }}
-              className="w-full bg-tea-dark text-white font-bold py-3 rounded"
+              className="w-full bg-tea-dark text-white font-bold py-3 rounded hover:bg-opacity-90 transition shadow"
             >
               Continue to Payment
             </button>
@@ -483,30 +588,138 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
           <div>
              <h3 className="font-bold mb-4">Payment Method</h3>
              <div className="space-y-3 mb-6">
-               {['UPI', 'Card', 'COD'].map((method) => (
-                 <label key={method} className="flex items-center p-4 border rounded cursor-pointer hover:bg-gray-50">
-                   <input 
-                    type="radio" 
-                    name="payment" 
-                    checked={payment === method} 
-                    onChange={() => setPayment(method as any)}
-                    className="mr-3"
-                   />
-                   <span className="font-medium">
-                     {method === 'UPI' ? 'UPI (GPay/PhonePe/Paytm)' : method === 'Card' ? 'Credit/Debit Card' : 'Cash on Delivery'}
-                   </span>
+               {['UPI', 'Card', 'MANUAL_UPI', 'COD'].map((method) => (
+                 <label key={method} className="flex flex-col p-4 border rounded cursor-pointer hover:bg-gray-50 transition">
+                   <div className="flex items-center">
+                     <input 
+                      type="radio" 
+                      name="payment" 
+                      checked={payment === method} 
+                      onChange={() => setPayment(method as any)}
+                      className="mr-3"
+                     />
+                     <span className="font-medium text-sm md:text-base">
+                       {method === 'UPI' ? 'UPI (GPay/PhonePe/Paytm - Auto)' : method === 'Card' ? 'Credit/Debit Card / NetBanking' : method === 'MANUAL_UPI' ? 'Direct UPI Transfer / Scan QR (Manual/Zero-Fee)' : 'Cash on Delivery'}
+                     </span>
+                   </div>
+
+                   {method === 'MANUAL_UPI' && payment === 'MANUAL_UPI' && (
+                     <div className="mt-4 border-t pt-4 space-y-4 text-sm text-gray-700 bg-gray-50 p-4 rounded-md">
+                       
+                       {/* Choice Tab between QR Code and Direct UPI payment */}
+                       <div className="flex gap-2 p-1 bg-gray-200/60 rounded-lg">
+                         <button
+                           type="button"
+                           onClick={(e) => { e.preventDefault(); setUpiMethod('qr'); }}
+                           className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${upiMethod === 'qr' ? 'bg-white shadow-sm text-tea-dark' : 'text-gray-500 hover:text-gray-800'}`}
+                         >
+                           📷 Scan QR Code
+                         </button>
+                         <button
+                           type="button"
+                           onClick={(e) => { e.preventDefault(); setUpiMethod('direct'); }}
+                           className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${upiMethod === 'direct' ? 'bg-white shadow-sm text-tea-dark' : 'text-gray-500 hover:text-gray-800'}`}
+                         >
+                           ⚡ Direct UPI / Click to Pay
+                         </button>
+                       </div>
+
+                       {upiMethod === 'qr' ? (
+                         <div className="space-y-3">
+                           <p className="font-bold text-tea-dark flex items-center gap-1">
+                             <span>1. Scan QR Code to Pay</span>
+                           </p>
+                           <div className="flex flex-col items-center justify-center p-3 bg-white rounded border shadow-sm">
+                             <img 
+                               src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(`upi://pay?pa=${paymentSettings.merchantUpiId || 'amritassamtea@okaxis'}&pn=Amrit Assam Tea&am=${total}&cu=INR&tn=AmritAssamOrder`)}`}
+                               alt="Payment QR" 
+                               referrerPolicy="no-referrer"
+                               className="w-44 h-44 border p-1 rounded bg-white shadow-sm"
+                             />
+                             <span className="text-[10px] text-gray-400 mt-2 font-medium">Scan using GPay, PhonePe, Paytm, BHIM or any UPI app</span>
+                           </div>
+                         </div>
+                       ) : (
+                         <div className="space-y-3">
+                           <p className="font-bold text-tea-dark flex items-center gap-1">
+                             <span>1. Copy Merchant UPI ID & Pay</span>
+                           </p>
+                           
+                           <div className="flex justify-between items-center bg-white p-3 rounded-md border shadow-sm">
+                             <div>
+                               <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold block">Merchant UPI ID</span>
+                               <span className="font-mono font-bold text-tea-dark select-all text-sm">{paymentSettings.merchantUpiId || 'amritassamtea@okaxis'}</span>
+                             </div>
+                             <button 
+                               type="button"
+                               onClick={(e) => {
+                                 e.preventDefault();
+                                 navigator.clipboard.writeText(paymentSettings.merchantUpiId || 'amritassamtea@okaxis');
+                                 alert("UPI ID copied!");
+                               }}
+                               className="text-xs bg-tea-green text-white font-bold px-3 py-1.5 rounded shadow-sm hover:bg-tea-dark transition"
+                             >
+                               Copy ID
+                             </button>
+                           </div>
+
+                           <div className="pt-2">
+                             <a 
+                               href={`upi://pay?pa=${paymentSettings.merchantUpiId || 'amritassamtea@okaxis'}&pn=Amrit%20Assam%20Tea&am=${total}&cu=INR&tn=AmritAssamOrder`}
+                               className="flex items-center justify-center gap-2 w-full bg-tea-dark hover:bg-opacity-95 text-white font-bold py-3 px-4 rounded shadow-md transition text-xs md:text-sm text-center"
+                             >
+                               🚀 Open UPI App / Click to Pay (₹{total})
+                             </a>
+                             <p className="text-[10px] text-center text-gray-400 mt-1">Directly opens your installed payment apps on mobile devices.</p>
+                           </div>
+                         </div>
+                       )}
+
+                       <p className="font-bold text-tea-dark border-t pt-3 flex items-center gap-1">
+                         <span>2. Enter Payment Details (Mandatory)</span>
+                       </p>
+                       <div className="space-y-3">
+                         <div>
+                           <label className="block text-xs font-bold text-gray-600 mb-1">Your UPI ID or Paid Mobile Number</label>
+                           <input 
+                             type="text"
+                             className="w-full border rounded p-2.5 text-sm focus:ring-2 focus:ring-tea-green outline-none"
+                             placeholder="e.g. yourname@okaxis or mobile number"
+                             value={customerUpi}
+                             onChange={e => setCustomerUpi(e.target.value)}
+                           />
+                         </div>
+                         <div>
+                           <label className="block text-xs font-bold text-gray-600 mb-1">12-Digit UPI Ref No. / Transaction ID / UTR</label>
+                           <input 
+                             type="text"
+                             maxLength={24}
+                             className="w-full border rounded p-2.5 text-sm font-mono focus:ring-2 focus:ring-tea-green outline-none"
+                             placeholder="e.g. 612345678901"
+                             value={utrNumber}
+                             onChange={e => setUtrNumber(e.target.value)}
+                           />
+                         </div>
+                       </div>
+                     </div>
+                   )}
                  </label>
                ))}
              </div>
              
              <div className="border-t pt-4 mb-4">
                <div className="flex justify-between text-xl font-bold">
-                 <span>Total Payble</span>
+                 <span>Total Payable</span>
                  <span>₹{total}</span>
                </div>
-               {payment !== 'COD' && (
+               {payment !== 'COD' && payment !== 'MANUAL_UPI' && (
                  <div className="text-xs text-gray-500 mt-2">
                    * Secure payment via Razorpay
+                 </div>
+               )}
+               {payment === 'MANUAL_UPI' && (
+                 <div className="text-xs text-amber-600 font-semibold mt-2">
+                   * Direct transfer. Your order is placed with "Pending" payment status and verified manually.
                  </div>
                )}
              </div>
@@ -514,9 +727,9 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
              <button 
               onClick={handlePlaceOrder}
               className="w-full bg-tea-red text-white font-bold py-3 rounded hover:bg-red-700 transition"
-            >
-              {payment === 'COD' ? 'Place Order' : 'Pay & Order'}
-            </button>
+             >
+              {payment === 'COD' ? 'Place Order' : payment === 'MANUAL_UPI' ? 'Confirm & Place Order' : 'Pay & Order'}
+             </button>
              <button 
               onClick={() => setStep(1)}
               className="w-full mt-2 text-gray-500 py-2"

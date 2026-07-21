@@ -1264,18 +1264,30 @@ export const Dashboard = () => {
                 {/* PAYMENT SETTINGS SECTION */}
                 <div className="mt-8 border-t pt-6">
                    <h4 className="font-bold text-lg mb-4 flex items-center gap-2 text-gray-600 border-b pb-2">
-                     <CreditCard size={20} /> Payment Gateway Settings
+                     <CreditCard size={20} /> Payment Gateway & Manual Transfer Settings
                    </h4>
-                   <div>
-                      <label className="block text-sm font-bold text-gray-600 mb-1">Razorpay Key ID (Public Key)</label>
-                      <input 
-                        className="w-full border p-3 rounded font-mono text-sm bg-gray-50" 
-                        value={paymentForm.razorpayKeyId}
-                        onChange={e => setPaymentForm({...paymentForm, razorpayKeyId: e.target.value})}
-                        placeholder="rzp_test_..."
-                      />
-                      <p className="text-xs text-gray-500 mt-1">This key is used to initiate payments on the checkout page.</p>
-                   </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                         <label className="block text-sm font-bold text-gray-600 mb-1">Razorpay Key ID (Public Key)</label>
+                         <input 
+                           className="w-full border p-3 rounded font-mono text-sm bg-gray-50" 
+                           value={paymentForm.razorpayKeyId}
+                           onChange={e => setPaymentForm({...paymentForm, razorpayKeyId: e.target.value})}
+                           placeholder="rzp_test_..."
+                         />
+                         <p className="text-xs text-gray-500 mt-1">This key is used to initiate payments on the checkout page.</p>
+                      </div>
+                      <div>
+                         <label className="block text-sm font-bold text-gray-600 mb-1">Manual Merchant UPI ID (For Direct Payments)</label>
+                         <input 
+                           className="w-full border p-3 rounded font-mono text-sm" 
+                           value={paymentForm.merchantUpiId || ''}
+                           onChange={e => setPaymentForm({...paymentForm, merchantUpiId: e.target.value})}
+                           placeholder="merchant@okaxis"
+                         />
+                         <p className="text-xs text-gray-500 mt-1">Directly receive zero-fee payments via dynamic QR code and manual verification.</p>
+                      </div>
+                    </div>
                 </div>
 
                 <div className="pt-4 flex justify-end">

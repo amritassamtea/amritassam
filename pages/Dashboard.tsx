@@ -603,6 +603,18 @@ export const Dashboard = () => {
   const [paymentForm, setPaymentForm] = useState<PaymentSettings>(paymentSettings);
   const [brandForm, setBrandForm] = useState<BrandAssets>(brandAssets);
 
+  React.useEffect(() => {
+    setSettingsForm(invoiceSettings);
+  }, [invoiceSettings]);
+
+  React.useEffect(() => {
+    setPaymentForm(paymentSettings);
+  }, [paymentSettings]);
+
+  React.useEffect(() => {
+    setBrandForm(brandAssets);
+  }, [brandAssets]);
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!editingProduct) return;
     const file = e.target.files?.[0];

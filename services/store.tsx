@@ -238,7 +238,7 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
                  footerNote: data.footer_note || DEFAULT_INVOICE_SETTINGS.footerNote
              });
              let rzpKey = data.razorpay_key_id || DEFAULT_PAYMENT_SETTINGS.razorpayKeyId;
-             if (rzpKey === 'rzp_test_1DP5mmOlF5G5ag' || rzpKey === 'rzp_test_TG637ITm48z8Ra') {
+             if (rzpKey === 'rzp_test_1DP5mmOlF5G5ag' || rzpKey === 'rzp_test_TG637ITm48z8Ra' || rzpKey === 'rzp_test_TB2Phw7nWzv1u8') {
                  rzpKey = 'rzp_test_TG67jxp1pHTgMB';
                  // Self-heal DB: update stale or default database values asynchronously
                  supabase.from('site_settings').update({ razorpay_key_id: rzpKey }).eq('id', 1).then();

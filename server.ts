@@ -22,7 +22,7 @@ app.post("/api/create-order", async (req, res) => {
     return res.status(400).json({ error: "Amount must be at least 100 paise" });
   }
 
-  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keyId = process.env.RAZORPAY_KEY_ID || "rzp_test_TG67jxp1pHTgMB";
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
   if (!keyId || !keySecret) {
@@ -31,7 +31,7 @@ app.post("/api/create-order", async (req, res) => {
       order_id: `mock_order_${Date.now()}`,
       amount: Math.round(amount),
       currency: currency || "INR",
-      key_id: "mock_key_id",
+      key_id: keyId,
       is_mock: true,
     });
   }

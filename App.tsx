@@ -343,7 +343,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
         // Determine the public Key ID to use for the frontend modal
         const useKey = (key_id && key_id !== "mock_key_id")
           ? key_id
-          : (import.meta.env.VITE_RAZORPAY_KEY_ID || paymentSettings.razorpayKeyId || "rzp_test_TG637ITm48z8Ra");
+          : (import.meta.env.VITE_RAZORPAY_KEY_ID || paymentSettings.razorpayKeyId || "rzp_test_TG67jxp1pHTgMB");
 
         // Step 2: Configure Razorpay Payment Modal Options
         const options: any = {

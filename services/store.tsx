@@ -118,7 +118,7 @@ const DEFAULT_INVOICE_SETTINGS: InvoiceSettings = {
 };
 
 const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
-  razorpayKeyId: 'rzp_test_1DP5mmOlF5G5ag'
+  razorpayKeyId: 'rzp_test_TG67jxp1pHTgMB'
 };
 
 const DEFAULT_BRAND_ASSETS: BrandAssets = {
@@ -237,8 +237,14 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
                  phone: data.phone || DEFAULT_INVOICE_SETTINGS.phone,
                  footerNote: data.footer_note || DEFAULT_INVOICE_SETTINGS.footerNote
              });
+             let rzpKey = data.razorpay_key_id || DEFAULT_PAYMENT_SETTINGS.razorpayKeyId;
+             if (rzpKey === 'rzp_test_1DP5mmOlF5G5ag' || rzpKey === 'rzp_test_TG637ITm48z8Ra') {
+                 rzpKey = 'rzp_test_TG67jxp1pHTgMB';
+                 // Self-heal DB: update stale or default database values asynchronously
+                 supabase.from('site_settings').update({ razorpay_key_id: rzpKey }).eq('id', 1).then();
+             }
              setPaymentSettings({
-                 razorpayKeyId: data.razorpay_key_id || DEFAULT_PAYMENT_SETTINGS.razorpayKeyId
+                 razorpayKeyId: rzpKey
              });
              setBrandAssets({
                  logo: data.logo || null,

@@ -1,0 +1,6 @@
+{
+  "name": "Amrit Assam Gold Tea",
+  "description": "Role-based e-commerce platform for Amrit Assam Gold Tea, connecting customers, distributors, and administrators with specialized dashboards.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

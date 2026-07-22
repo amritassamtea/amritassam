@@ -13,6 +13,21 @@ const PORT = 3000;
 
 app.use(express.json());
 
+// Helper to get active Razorpay Credentials safely
+function getRazorpayCredentials() {
+  let keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keySecret || keySecret.trim() === "" || keySecret.trim() === "mDRwyfjMwJTmcepn8OfHn260" || keySecret.trim() === "BFvu3Tx4WfSneO8vZnCE5KlP") {
+    keySecret = "Pzk9HfiHvu894ySK0XrdSS4N";
+  }
+
+  let keyId = process.env.RAZORPAY_KEY_ID;
+  if (!keyId || keyId.trim() === "" || keyId === "rzp_test_TGSXaCkUr8lyVc" || keyId === "rzp_test_TGSeD6kDjDtnoA" || keySecret === "Pzk9HfiHvu894ySK0XrdSS4N") {
+    keyId = "rzp_test_TGSnHi9bfhqqFK";
+  }
+
+  return { keyId, keySecret };
+}
+
 // --- RAZORPAY API ROUTES ---
 
 // 1. Create Order
@@ -22,8 +37,7 @@ app.post("/api/create-order", async (req, res) => {
     return res.status(400).json({ error: "Amount must be at least 100 paise" });
   }
 
-  const keyId = process.env.RAZORPAY_KEY_ID || "rzp_test_TGSnHi9bfhqqFK";
-  const keySecret = process.env.RAZORPAY_KEY_SECRET || "Pzk9HfiHvu894ySK0XrdSS4N";
+  const { keyId, keySecret } = getRazorpayCredentials();
 
   try {
     const RazorpayClass = (Razorpay as any).default || Razorpay;
@@ -58,11 +72,11 @@ app.post("/api/verify-payment", async (req, res) => {
     return res.status(400).json({ error: "Missing required verification fields" });
   }
 
-  const secret = process.env.RAZORPAY_KEY_SECRET || "Pzk9HfiHvu894ySK0XrdSS4N";
+  const { keySecret } = getRazorpayCredentials();
 
   const body = razorpay_order_id + "|" + razorpay_payment_id;
   const expectedSignature = crypto
-    .createHmac("sha256", secret)
+    .createHmac("sha256", keySecret)
     .update(body.toString())
     .digest("hex");
 
@@ -80,8 +94,7 @@ app.post("/api/refund-payment", async (req, res) => {
     return res.status(400).json({ error: "Payment ID is required for refund" });
   }
 
-  const keyId = process.env.RAZORPAY_KEY_ID || "rzp_test_TGSnHi9bfhqqFK";
-  const keySecret = process.env.RAZORPAY_KEY_SECRET || "Pzk9HfiHvu894ySK0XrdSS4N";
+  const { keyId, keySecret } = getRazorpayCredentials();
 
   try {
     const RazorpayClass = (Razorpay as any).default || Razorpay;

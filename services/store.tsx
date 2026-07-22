@@ -128,10 +128,20 @@ const DEFAULT_BRAND_ASSETS: BrandAssets = {
   featureImage: 'https://picsum.photos/seed/teamaking/600/400'
 };
 
+const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutes in ms
+
 export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
   const [user, setUser] = useState<User | null>(() => {
     try {
-      const cached = localStorage.getItem('amrit_assam_cached_user');
+      const lastAct = localStorage.getItem('amrit_assam_last_activity') || sessionStorage.getItem('amrit_assam_last_activity');
+      if (lastAct && Date.now() - parseInt(lastAct, 10) >= INACTIVITY_TIMEOUT) {
+        localStorage.removeItem('amrit_assam_cached_user');
+        localStorage.removeItem('amrit_assam_last_activity');
+        sessionStorage.removeItem('amrit_assam_cached_user');
+        sessionStorage.removeItem('amrit_assam_last_activity');
+        return null;
+      }
+      const cached = localStorage.getItem('amrit_assam_cached_user') || sessionStorage.getItem('amrit_assam_cached_user');
       return cached ? JSON.parse(cached) : null;
     } catch {
       return null;
@@ -313,7 +323,11 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
              if(data) {
                  const mapped = mapUserFromDB(data);
                  setUser(mapped);
+                 const nowStr = Date.now().toString();
                  localStorage.setItem('amrit_assam_cached_user', JSON.stringify(mapped));
+                 localStorage.setItem('amrit_assam_last_activity', nowStr);
+                 sessionStorage.setItem('amrit_assam_cached_user', JSON.stringify(mapped));
+                 sessionStorage.setItem('amrit_assam_last_activity', nowStr);
              }
           });
           fetchOrders();
@@ -329,7 +343,11 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
                 if(data) {
                     const mapped = mapUserFromDB(data);
                     setUser(mapped);
+                    const nowStr = Date.now().toString();
                     localStorage.setItem('amrit_assam_cached_user', JSON.stringify(mapped));
+                    localStorage.setItem('amrit_assam_last_activity', nowStr);
+                    sessionStorage.setItem('amrit_assam_cached_user', JSON.stringify(mapped));
+                    sessionStorage.setItem('amrit_assam_last_activity', nowStr);
                     if(data.role === 'ADMIN') {
                         fetchOrders();
                         fetchUsers();
@@ -348,6 +366,43 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // --- INACTIVITY 10 MIN AUTO LOGOUT MONITOR ---
+  useEffect(() => {
+    if (!user) return;
+
+    const now = Date.now();
+    localStorage.setItem('amrit_assam_last_activity', now.toString());
+    sessionStorage.setItem('amrit_assam_last_activity', now.toString());
+
+    let lastActivityTime = now;
+
+    const handleUserActivity = () => {
+      const current = Date.now();
+      if (current - lastActivityTime > 3000) {
+        lastActivityTime = current;
+        localStorage.setItem('amrit_assam_last_activity', current.toString());
+        sessionStorage.setItem('amrit_assam_last_activity', current.toString());
+      }
+    };
+
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart', 'focus'];
+    events.forEach(evt => window.addEventListener(evt, handleUserActivity, { passive: true }));
+
+    const checkInterval = setInterval(() => {
+      const storedLastAct = localStorage.getItem('amrit_assam_last_activity') || sessionStorage.getItem('amrit_assam_last_activity');
+      const lastAct = storedLastAct ? parseInt(storedLastAct, 10) : lastActivityTime;
+      if (Date.now() - lastAct >= INACTIVITY_TIMEOUT) {
+        alert("Aap 10 minute tak inactive the, isliye security ke liye auto-logout kar diya gaya hai. Kripya fir se login karein.");
+        logout();
+      }
+    }, 10000);
+
+    return () => {
+      events.forEach(evt => window.removeEventListener(evt, handleUserActivity));
+      clearInterval(checkInterval);
+    };
+  }, [user]);
 
   // --- ACTIONS ---
 
@@ -373,11 +428,18 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
             alert("Your distributor account is pending approval by Admin.");
             supabase.auth.signOut();
             localStorage.removeItem('amrit_assam_cached_user');
+            localStorage.removeItem('amrit_assam_last_activity');
+            sessionStorage.removeItem('amrit_assam_cached_user');
+            sessionStorage.removeItem('amrit_assam_last_activity');
             return false;
         }
         const mapped = mapUserFromDB(profile);
         setUser(mapped);
+        const nowStr = Date.now().toString();
         localStorage.setItem('amrit_assam_cached_user', JSON.stringify(mapped));
+        localStorage.setItem('amrit_assam_last_activity', nowStr);
+        sessionStorage.setItem('amrit_assam_cached_user', JSON.stringify(mapped));
+        sessionStorage.setItem('amrit_assam_last_activity', nowStr);
         return true;
     }
     return false;
@@ -387,6 +449,9 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
     await supabase.auth.signOut();
     setUser(null);
     localStorage.removeItem('amrit_assam_cached_user');
+    localStorage.removeItem('amrit_assam_last_activity');
+    sessionStorage.removeItem('amrit_assam_cached_user');
+    sessionStorage.removeItem('amrit_assam_last_activity');
     setCart([]);
   };
 

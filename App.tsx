@@ -360,42 +360,28 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
       }
 
       try {
-        let order_id = `mock_order_${Date.now()}`;
-        let useKey = paymentSettings.razorpayKeyId || import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_test_TGSeD6kDjDtnoA";
-        let is_mock = true;
+        // Step 1: Create Order on Backend
+        const res = await fetch("/api/create-order", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            amount: Math.round(total * 100), // Amount in paise
+            currency: "INR",
+            receipt: `rcpt_${Date.now()}`
+          })
+        });
 
-        try {
-          // Step 1: Create Order on Backend
-          const res = await fetch("/api/create-order", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              amount: Math.round(total * 100), // Amount in paise
-              currency: "INR",
-              receipt: `rcpt_${Date.now()}`
-            })
-          });
-
-          if (res.ok) {
-            const text = await res.text();
-            try {
-              const orderData = JSON.parse(text);
-              order_id = orderData.order_id || `mock_order_${Date.now()}`;
-              if (orderData.key_id && orderData.key_id !== "mock_key_id") {
-                useKey = orderData.key_id;
-              }
-              is_mock = !!orderData.is_mock;
-            } catch (jsonErr) {
-              console.warn("Backend returned non-JSON response. Falling back to client-side payment mode.");
-            }
-          } else {
-            console.warn(`Backend order API returned status ${res.status}. Falling back to client-side payment mode.`);
-          }
-        } catch (fetchErr) {
-          console.warn("Could not connect to backend payment API. Falling back to client-side payment mode:", fetchErr);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          alert("Payment Order Creation Failed: " + (errData.error || "Server error"));
+          return;
         }
+
+        const orderData = await res.json();
+        const order_id = orderData.order_id;
+        const useKey = orderData.key_id || paymentSettings.razorpayKeyId || import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_test_TGSXaCkUr8lyVc";
 
         // Step 2: Configure Razorpay Payment Modal Options
         const options: any = {
@@ -405,6 +391,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
           name: "Amrit Assam Tea",
           description: "Fresh Assam Tea Order",
           image: "https://cdn-icons-png.flaticon.com/512/3063/3063822.png",
+          order_id: order_id,
           prefill: {
             name: user?.name || "Customer",
             contact: user?.mobile || "",
@@ -413,19 +400,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
           theme: {
             color: "#1a4d2e"
           },
-          modal: {
-            ondismiss: function () {
-              alert("Payment window closed.");
-            }
-          }
-        };
-
-        if (!is_mock && order_id && !order_id.startsWith("mock_order_")) {
-          // Real Razorpay authenticated server order flow
-          options.order_id = order_id;
-          options.handler = async function (response: any) {
-            let verified = false;
-            let paymentId = response.razorpay_payment_id;
+          handler: async function (response: any) {
             try {
               const verifyRes = await fetch("/api/verify-payment", {
                 method: "POST",
@@ -440,62 +415,34 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
               });
 
               if (verifyRes.ok) {
-                const verifyText = await verifyRes.text();
-                try {
-                  const verifyData = JSON.parse(verifyText);
-                  if (verifyData.status === "success") {
-                    verified = true;
-                  }
-                } catch (e) {
-                  console.warn("Backend verification returned non-JSON.");
+                const verifyData = await verifyRes.json();
+                if (verifyData.status === "success") {
+                  await placeOrder(payment, address, 'Paid', response.razorpay_payment_id);
+                  alert(`Payment Successful! Payment ID: ${response.razorpay_payment_id}`);
+                  onOrderPlaced();
+                  return;
                 }
               }
+              const verifyErr = await verifyRes.json().catch(() => ({}));
+              alert("Payment Signature Verification Failed: " + (verifyErr.error || "Invalid Signature"));
             } catch (verifyError: any) {
-              console.warn("Could not reach backend for signature verification:", verifyError);
+              alert("Could not contact server to verify payment signature. Please contact support.");
             }
-
-            if (verified || (paymentId && !paymentId.startsWith("pay_mock_"))) {
-              await placeOrder(payment, address, 'Paid', paymentId);
-              alert(`Payment Successful! Payment ID: ${paymentId}`);
-              onOrderPlaced();
-            } else {
-              alert("Payment verification could not be completed on server. If amount was deducted, please contact support with your payment ID.");
+          },
+          modal: {
+            ondismiss: function () {
+              alert("Payment window closed. Order was not placed.");
             }
-          };
-        } else {
-          // Client-side / Test payment handler
-          options.handler = async function (response: any) {
-            const payId = response.razorpay_payment_id || `pay_test_${Date.now()}`;
-            await placeOrder(payment, address, 'Paid', payId);
-            alert(`Payment Successful! Transaction ID: ${payId}`);
-            onOrderPlaced();
-          };
-        }
+          }
+        };
 
         const rzp1 = new (window as any).Razorpay(options);
-        rzp1.on('payment.failed', async function (response: any){
-          const errorDesc = response?.error?.description || "";
-          console.warn("Razorpay payment notice:", errorDesc);
-          const confirmSimulated = window.confirm(
-            `Razorpay Notice (${errorDesc || "Payment incomplete"}).\n\nWould you like to complete this order using Test / Simulated Payment Mode?`
-          );
-          if (confirmSimulated) {
-            const testPaymentId = `pay_test_${Date.now()}`;
-            await placeOrder(payment, address, 'Paid', testPaymentId);
-            alert(`Order Placed Successfully (Test Mode)!\nTransaction ID: ${testPaymentId}`);
-            onOrderPlaced();
-          }
+        rzp1.on('payment.failed', function (response: any){
+          const errorDesc = response?.error?.description || "Transaction failed";
+          alert(`Payment Failed: ${errorDesc}`);
         });
 
-        try {
-          rzp1.open();
-        } catch (openErr: any) {
-          console.warn("Could not open Razorpay modal directly:", openErr);
-          const testPaymentId = `pay_test_${Date.now()}`;
-          await placeOrder(payment, address, 'Paid', testPaymentId);
-          alert(`Order Placed Successfully (Test Mode)!\nTransaction ID: ${testPaymentId}`);
-          onOrderPlaced();
-        }
+        rzp1.open();
 
       } catch (err: any) {
         alert("Error initializing payment: " + (err.message || err));

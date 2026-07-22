@@ -22,22 +22,8 @@ app.post("/api/create-order", async (req, res) => {
     return res.status(400).json({ error: "Amount must be at least 100 paise" });
   }
 
-  const keyId = "rzp_test_TGSeD6kDjDtnoA";
-  const keySecret = "mDRwyfjMwJTmcepn8OfHn260";
-
-  console.log("Creating Razorpay order with key_id:", keyId, "key_secret:", keySecret);
-
-  if (!keySecret || keySecret.trim() === "") {
-    console.warn("Razorpay KEY_SECRET not configured. Using client-side payment mode.");
-    return res.json({
-      order_id: `mock_order_${Date.now()}`,
-      amount: Math.round(amount),
-      currency: currency || "INR",
-      key_id: keyId,
-      is_mock: true,
-      reason: "Razorpay secret key not configured"
-    });
-  }
+  const keyId = process.env.RAZORPAY_KEY_ID || "rzp_test_TGSnHi9bfhqqFK";
+  const keySecret = process.env.RAZORPAY_KEY_SECRET || "Pzk9HfiHvu894ySK0XrdSS4N";
 
   try {
     const RazorpayClass = (Razorpay as any).default || Razorpay;
@@ -57,19 +43,11 @@ app.post("/api/create-order", async (req, res) => {
       amount: order.amount,
       currency: order.currency,
       key_id: keyId,
-      is_mock: false,
     });
   } catch (error: any) {
-    const errDesc = error?.error?.description || error?.description || error?.message || "Razorpay API notice";
-    console.log("Razorpay API order creation in fallback/mock mode:", errDesc);
-    res.json({
-      order_id: `mock_order_${Date.now()}`,
-      amount: Math.round(amount),
-      currency: currency || "INR",
-      key_id: keyId,
-      is_mock: true,
-      reason: errDesc
-    });
+    const errDesc = error?.error?.description || error?.description || error?.message || "Failed to create Razorpay order";
+    console.error("Razorpay order creation error:", errDesc);
+    res.status(500).json({ error: errDesc });
   }
 });
 
@@ -80,15 +58,7 @@ app.post("/api/verify-payment", async (req, res) => {
     return res.status(400).json({ error: "Missing required verification fields" });
   }
 
-  // Graceful fallback for mock orders
-  if (razorpay_order_id.startsWith("mock_") || razorpay_signature === "mock_signature") {
-    return res.json({ status: "success", message: "Mock payment verified successfully" });
-  }
-
-  const secret = process.env.RAZORPAY_KEY_SECRET || "mDRwyfjMwJTmcepn8OfHn260";
-  if (!secret) {
-    return res.status(500).json({ error: "Razorpay secret key not configured on backend" });
-  }
+  const secret = process.env.RAZORPAY_KEY_SECRET || "Pzk9HfiHvu894ySK0XrdSS4N";
 
   const body = razorpay_order_id + "|" + razorpay_payment_id;
   const expectedSignature = crypto
@@ -110,24 +80,12 @@ app.post("/api/refund-payment", async (req, res) => {
     return res.status(400).json({ error: "Payment ID is required for refund" });
   }
 
-  const keyId = process.env.RAZORPAY_KEY_ID || "rzp_test_TGSeD6kDjDtnoA";
-  let keySecret = process.env.RAZORPAY_KEY_SECRET;
-  if (!keySecret || keyId === "rzp_test_TGSeD6kDjDtnoA") {
-    keySecret = "mDRwyfjMwJTmcepn8OfHn260";
-  }
-
-  if (!keyId || !keySecret || payment_id.startsWith("pay_mock_")) {
-    console.warn("Razorpay credentials not found or mock payment ID. Returning simulated refund response.");
-    return res.json({
-      status: "success",
-      refund_id: `rfnd_mock_${Date.now()}`,
-      amount: amount || 0,
-      message: "Refund process initiated successfully (Simulated mode)."
-    });
-  }
+  const keyId = process.env.RAZORPAY_KEY_ID || "rzp_test_TGSnHi9bfhqqFK";
+  const keySecret = process.env.RAZORPAY_KEY_SECRET || "Pzk9HfiHvu894ySK0XrdSS4N";
 
   try {
-    const razorpay = new Razorpay({
+    const RazorpayClass = (Razorpay as any).default || Razorpay;
+    const razorpay = new RazorpayClass({
       key_id: keyId,
       key_secret: keySecret,
     });
@@ -140,17 +98,12 @@ app.post("/api/refund-payment", async (req, res) => {
       status: "success",
       refund_id: refund.id,
       amount: refund.amount,
-      message: "Refund processed successfully with Razorpay to customer's account."
+      message: "Refund processed successfully with Razorpay."
     });
   } catch (error: any) {
-    const errDesc = error?.error?.description || error?.description || error?.message || "Failed to process refund with Razorpay";
-    console.warn("Razorpay refund API notice (using fallback simulated refund):", errDesc);
-    res.json({
-      status: "success",
-      refund_id: `rfnd_mock_${Date.now()}`,
-      amount: amount || 0,
-      message: `Refund recorded in system (${errDesc}).`
-    });
+    const errDesc = error?.error?.description || error?.description || error?.message || "Failed to process refund";
+    console.error("Razorpay refund error:", errDesc);
+    res.status(500).json({ error: errDesc });
   }
 });
 

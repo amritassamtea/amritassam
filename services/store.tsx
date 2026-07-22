@@ -393,7 +393,7 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
       const storedLastAct = localStorage.getItem('amrit_assam_last_activity') || sessionStorage.getItem('amrit_assam_last_activity');
       const lastAct = storedLastAct ? parseInt(storedLastAct, 10) : lastActivityTime;
       if (Date.now() - lastAct >= INACTIVITY_TIMEOUT) {
-        alert("Aap 10 minute tak inactive the, isliye security ke liye auto-logout kar diya gaya hai. Kripya fir se login karein.");
+        alert("You were inactive for 10 minutes and have been automatically logged out for security. Please log in again.");
         logout();
       }
     }, 10000);
@@ -668,7 +668,7 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
 
       if (targetOrder.paymentStatus === 'Paid') {
         const confirmCancel = window.confirm(
-          `Is order status ko 'Cancelled' set kiya ja raha hai.\nTotal Amount: ₹${targetOrder.totalAmount}\nKya aap customer ke original account me refund initiate karna chahte hain?`
+          `This order is being marked as 'Cancelled'.\nTotal Amount: ₹${targetOrder.totalAmount}\nWould you like to initiate a refund to the customer's original account?`
         );
 
         if (!confirmCancel) return;
@@ -693,7 +693,7 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
             newPaymentStatus = 'Refunded';
           }
         } catch (err: any) {
-          refundMsg = "Refund request process ho gayi hai (Simulated refund).";
+          refundMsg = "Refund request processed (Simulated refund).";
           newPaymentStatus = 'Refunded';
         }
       }

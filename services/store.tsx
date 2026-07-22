@@ -193,11 +193,12 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
   };
 
   const fetchOrders = async () => {
+    try {
       const { data: ordersData, error } = await supabase
         .from('orders')
         .select(`
             *,
-            profiles (name, mobile, phone, address, gst_number),
+            profiles (name, mobile, address, gst_number),
             order_items (
                 quantity,
                 products (*)
@@ -205,10 +206,32 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
         `)
         .order('created_at', { ascending: false });
 
-      if (ordersData) {
-          const mappedOrders = ordersData.map(o => mapOrderFromDB(o, o.order_items));
-          setOrders(mappedOrders);
+      if (error) {
+        console.warn("Joined orders query failed, falling back to simple query:", error);
+        const { data: simpleOrders } = await supabase
+          .from('orders')
+          .select(`
+              *,
+              order_items (
+                  quantity,
+                  products (*)
+              )
+          `)
+          .order('created_at', { ascending: false });
+
+        if (simpleOrders) {
+          setOrders(simpleOrders.map(o => mapOrderFromDB(o, o.order_items)));
+        }
+        return;
       }
+
+      if (ordersData) {
+        const mappedOrders = ordersData.map(o => mapOrderFromDB(o, o.order_items));
+        setOrders(mappedOrders);
+      }
+    } catch (err) {
+      console.error("fetchOrders error:", err);
+    }
   };
 
   const fetchUsers = async () => {
@@ -578,6 +601,27 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
              await supabase.from('products').update({ stock: newStock }).eq('id', item.id);
          }
     }
+
+    const newOrderObj: Order = {
+      id: orderData.id,
+      userId: user.id,
+      userName: user.name,
+      userMobile: user.mobile,
+      userAddress: address || user.address || '',
+      userGst: user.gstNumber || '',
+      items: cart.map(item => ({ ...item })),
+      totalAmount: Math.round(totalAmount),
+      taxAmount: Math.round(taxAmount),
+      status: 'Processing',
+      paymentMethod: paymentMethod,
+      paymentStatus: paymentStatus,
+      transactionId: transactionId || undefined,
+      date: new Date().toISOString().split('T')[0],
+      type: user.role === 'DISTRIBUTOR' ? 'WHOLESALE' : 'RETAIL',
+      invoiceNumber: orderData.invoice_number
+    };
+
+    setOrders(prev => [newOrderObj, ...prev.filter(o => o.id !== newOrderObj.id)]);
 
     fetchOrders();
     fetchProducts();

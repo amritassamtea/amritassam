@@ -98,6 +98,50 @@ app.post("/api/verify-payment", async (req, res) => {
   }
 });
 
+// 3. Process Refund
+app.post("/api/refund-payment", async (req, res) => {
+  const { payment_id, amount } = req.body;
+  if (!payment_id) {
+    return res.status(400).json({ error: "Payment ID is required for refund" });
+  }
+
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+  if (!keyId || !keySecret || payment_id.startsWith("pay_mock_")) {
+    console.warn("Razorpay credentials not found or mock payment ID. Returning simulated refund response.");
+    return res.json({
+      status: "success",
+      refund_id: `rfnd_mock_${Date.now()}`,
+      amount: amount || 0,
+      message: "Refund process initiated successfully (Simulated mode)."
+    });
+  }
+
+  try {
+    const razorpay = new Razorpay({
+      key_id: keyId,
+      key_secret: keySecret,
+    });
+
+    const refund = await razorpay.payments.refund(payment_id, {
+      amount: amount ? Math.round(amount) : undefined, // amount in paise
+    });
+
+    res.json({
+      status: "success",
+      refund_id: refund.id,
+      amount: refund.amount,
+      message: "Refund processed successfully with Razorpay to customer's account."
+    });
+  } catch (error: any) {
+    console.error("Error processing Razorpay refund:", error);
+    res.status(500).json({
+      error: error.message || "Failed to process refund with Razorpay"
+    });
+  }
+});
+
 // --- VITE DEV / PRODUCTION HANDLERS ---
 
 async function startServer() {

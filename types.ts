@@ -42,7 +42,7 @@ export interface Order {
   taxAmount: number; // GST
   status: 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled';
   paymentMethod: 'UPI' | 'Card' | 'COD' | 'Cash';
-  paymentStatus: 'Pending' | 'Paid';
+  paymentStatus: 'Pending' | 'Paid' | 'Refunded';
   transactionId?: string; // Added for Razorpay Payment ID
   date: string;
   type: 'RETAIL' | 'WHOLESALE';

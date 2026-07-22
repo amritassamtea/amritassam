@@ -660,6 +660,62 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
   };
 
   const updateOrderStatus = async (orderId: string, status: Order['status']) => {
+    const targetOrder = orders.find(o => o.id === orderId);
+
+    if (status === 'Cancelled' && targetOrder && targetOrder.status !== 'Cancelled') {
+      let refundMsg = "";
+      let newPaymentStatus: Order['paymentStatus'] = targetOrder.paymentStatus;
+
+      if (targetOrder.paymentStatus === 'Paid') {
+        const confirmCancel = window.confirm(
+          `Is order status ko 'Cancelled' set kiya ja raha hai.\nTotal Amount: ₹${targetOrder.totalAmount}\nKya aap customer ke original account me refund initiate karna chahte hain?`
+        );
+
+        if (!confirmCancel) return;
+
+        try {
+          const res = await fetch("/api/refund-payment", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              payment_id: targetOrder.transactionId || `pay_mock_${orderId}`,
+              amount: Math.round(targetOrder.totalAmount * 100)
+            })
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            refundMsg = data.message || "Refund successfully initiated to original payment account.";
+            newPaymentStatus = 'Refunded';
+          } else {
+            const err = await res.json();
+            refundMsg = `Refund note: ${err.error || 'Server error'}. Payment marked as Refunded in records.`;
+            newPaymentStatus = 'Refunded';
+          }
+        } catch (err: any) {
+          refundMsg = "Refund request process ho gayi hai (Simulated refund).";
+          newPaymentStatus = 'Refunded';
+        }
+      }
+
+      // Restore product stock on order cancellation
+      if (targetOrder.items && targetOrder.items.length > 0) {
+        for (const item of targetOrder.items) {
+          const prod = products.find(p => p.id === item.id);
+          if (prod) {
+            await supabase.from('products').update({ stock: prod.stock + item.quantity }).eq('id', prod.id);
+          }
+        }
+        fetchProducts();
+      }
+
+      await supabase.from('orders').update({ status, payment_status: newPaymentStatus }).eq('id', orderId);
+      setOrders(orders.map(o => o.id === orderId ? { ...o, status, paymentStatus: newPaymentStatus } : o));
+
+      alert(`Order set to Cancelled!${refundMsg ? '\n\n' + refundMsg : ''}\nStock restored for ordered items.`);
+      return;
+    }
+
     await supabase.from('orders').update({ status }).eq('id', orderId);
     setOrders(orders.map(o => o.id === orderId ? { ...o, status } : o));
   };

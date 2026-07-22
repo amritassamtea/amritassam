@@ -35,6 +35,7 @@ export interface Order {
   id: string;
   userId: string;
   userName: string;
+  userMobile?: string;
   userAddress?: string;
   userGst?: string;
   items: CartItem[];

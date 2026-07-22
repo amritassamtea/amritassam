@@ -79,6 +79,9 @@ const mapOrderFromDB = (o: any, items: any[]): Order => ({
   id: o.id,
   userId: o.user_id,
   userName: o.profiles?.name || 'Unknown', // Join with profiles
+  userMobile: o.profiles?.mobile || o.profiles?.phone || '',
+  userAddress: o.shipping_address || o.profiles?.address || '',
+  userGst: o.profiles?.gst_number || '',
   items: items.map(i => ({
     id: i.products?.id,
     name: i.products?.name,
@@ -101,8 +104,7 @@ const mapOrderFromDB = (o: any, items: any[]): Order => ({
   transactionId: o.transaction_id,
   date: new Date(o.created_at).toISOString().split('T')[0],
   type: o.order_type,
-  invoiceNumber: o.invoice_number,
-  userAddress: o.shipping_address
+  invoiceNumber: o.invoice_number
 });
 
 // --- DEFAULTS ---
@@ -195,7 +197,7 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
         .from('orders')
         .select(`
             *,
-            profiles (name),
+            profiles (name, mobile, phone, address, gst_number),
             order_items (
                 quantity,
                 products (*)

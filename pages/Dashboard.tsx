@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useStore } from '../services/store';
 import { ReviewModal } from '../components/ReviewModal';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
-import { Package, DollarSign, Users, CheckCircle, XCircle, Printer, AlertTriangle, FileText, PlusCircle, Trash2, Settings, Save, TrendingUp, ClipboardList, CreditCard, Download, UploadCloud, Image as ImageIcon, RotateCcw, KeyRound, Star, MessageSquare, Edit } from 'lucide-react';
+import { Package, DollarSign, Users, CheckCircle, XCircle, Printer, AlertTriangle, FileText, PlusCircle, Trash2, Settings, Save, TrendingUp, ClipboardList, CreditCard, Download, UploadCloud, Image as ImageIcon, RotateCcw, KeyRound, Star, MessageSquare, Edit, Phone, MapPin, User as UserIcon } from 'lucide-react';
 import { Product, Order, User, PurchaseItem, PurchaseOrder, InvoiceSettings, PaymentSettings, BrandAssets, Role, Review } from '../types';
 
 // --- UTILS ---
@@ -91,6 +91,9 @@ const InvoiceTemplate = ({ order, onClose }: { order: Order; onClose: () => void
           <div className="mb-8">
             <h3 className="font-bold text-gray-600 border-b mb-2">BILL TO</h3>
             <p className="font-bold text-lg">{order.userName}</p>
+            {(order.userMobile || users?.find(u => u.id === order.userId)?.mobile) && (
+              <p className="text-gray-700 font-medium">Mobile: {order.userMobile || users?.find(u => u.id === order.userId)?.mobile}</p>
+            )}
             <p className="text-gray-700 w-1/2">{order.userAddress || 'Address not provided'}</p>
             <p className="text-gray-700">Role: {order.type}</p>
             {order.userGst && <p className="text-gray-700">GST: {order.userGst}</p>}
@@ -415,6 +418,7 @@ const ManualOrderForm = ({ products, users, onClose, onSubmit }: { products: Pro
       id: `ORD-${Date.now()}`,
       userId: user.id,
       userName: user.name,
+      userMobile: user.mobile,
       userAddress: user.address || 'Counter Sale',
       items: cart.map(c => ({...c.product, quantity: c.quantity})),
       totalAmount: Math.round(total + tax),
@@ -928,63 +932,153 @@ export const Dashboard = () => {
         )}
 
         {activeTab === 'ORDERS' && (
-             <div className="animate-fade-in">
-                 <div className="flex justify-end mb-4 gap-2">
-                    <button onClick={() => setShowManualOrder(true)} className="bg-tea-dark text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2 hover:bg-black">
-                         <PlusCircle size={20} /> Create New Order
+             <div className="animate-fade-in space-y-4">
+                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+                    <div>
+                      <h3 className="text-xl font-bold text-gray-800">Orders Management</h3>
+                      <p className="text-xs text-gray-500">View customer details, shipping address, mobile number, and items to dispatch.</p>
+                    </div>
+                    <button onClick={() => setShowManualOrder(true)} className="bg-tea-dark text-white px-4 py-2 rounded-lg font-bold shadow flex items-center gap-2 hover:bg-black transition text-sm">
+                         <PlusCircle size={18} /> Create New Order
                     </button>
                  </div>
-                 <div className="bg-white shadow rounded-lg p-4 space-y-2">
-                    {orders.length === 0 ? (
-                      <p className="text-gray-500 text-center py-6">No orders found.</p>
-                    ) : orders.map(order => (
-                        <div key={order.id} className="border-b py-4 last:border-b-0 flex flex-col md:flex-row md:items-center justify-between gap-3">
-                            <div>
-                                <div className="flex items-center gap-2">
-                                  <h4 className="font-bold text-gray-800">{order.userName}</h4>
-                                  <span className={`text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full ${
-                                    order.paymentStatus === 'Refunded' ? 'bg-purple-100 text-purple-800 border border-purple-300' :
-                                    order.paymentStatus === 'Paid' ? 'bg-green-100 text-green-800 border border-green-300' :
-                                    'bg-amber-100 text-amber-800 border border-amber-300'
-                                  }`}>
-                                    {order.paymentStatus}
-                                  </span>
-                                </div>
-                                <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
-                                  <span>ID: {order.id}</span>
-                                  <span>•</span>
-                                  <span>{order.date}</span>
-                                  <span>•</span>
-                                  <span>Method: {order.paymentMethod}</span>
-                                  {order.transactionId && (
-                                    <>
-                                      <span>•</span>
-                                      <span className="font-mono text-gray-600">Txn: {order.transactionId}</span>
-                                    </>
-                                  )}
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-4">
-                                <span className="font-bold text-lg text-gray-900">₹{order.totalAmount}</span>
-                                <select 
-                                  value={order.status} 
-                                  onChange={e => updateOrderStatus(order.id, e.target.value as any)} 
-                                  className={`border rounded px-3 py-1.5 text-sm font-semibold outline-none ${
-                                    order.status === 'Cancelled' ? 'bg-red-50 text-red-700 border-red-300' :
-                                    order.status === 'Delivered' ? 'bg-green-50 text-green-700 border-green-300' :
-                                    'bg-white text-gray-800'
-                                  }`}
-                                >
-                                    <option value="Processing">Processing</option>
-                                    <option value="Shipped">Shipped</option>
-                                    <option value="Delivered">Delivered</option>
-                                    <option value="Cancelled">Cancelled (Auto Refund)</option>
-                                </select>
-                                <button onClick={() => deleteOrder(order.id)} className="text-red-500 hover:text-red-700 p-1" title="Delete Order"><Trash2 size={18} /></button>
-                            </div>
-                        </div>
-                    ))}
-                 </div>
+
+                 {orders.length === 0 ? (
+                   <div className="bg-white p-12 rounded-xl border border-gray-200 text-center text-gray-500">
+                     <Package size={48} className="mx-auto mb-3 opacity-20" />
+                     <p>No orders found.</p>
+                   </div>
+                 ) : (
+                   <div className="space-y-4">
+                     {orders.map(order => {
+                       const customerMobile = order.userMobile || users.find(u => u.id === order.userId)?.mobile;
+                       const customerAddress = order.userAddress || users.find(u => u.id === order.userId)?.address;
+
+                       return (
+                         <div key={order.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 hover:shadow-md transition space-y-3">
+                           {/* Main Order Header & Customer Info */}
+                           <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 border-b pb-4">
+                             {/* Customer Details */}
+                             <div className="space-y-2 flex-1">
+                               <div className="flex items-center gap-2 flex-wrap">
+                                 <h4 className="font-bold text-lg text-gray-900 flex items-center gap-2">
+                                   <UserIcon size={20} className="text-tea-dark shrink-0" />
+                                   {order.userName}
+                                 </h4>
+                                 <span className={`text-[10px] uppercase font-extrabold px-2.5 py-0.5 rounded-full tracking-wider ${
+                                   order.type === 'WHOLESALE' ? 'bg-purple-100 text-purple-800 border border-purple-200' : 'bg-blue-100 text-blue-800 border border-blue-200'
+                                 }`}>
+                                   {order.type || 'RETAIL'}
+                                 </span>
+                                 <span className={`text-[10px] uppercase font-extrabold px-2.5 py-0.5 rounded-full tracking-wider ${
+                                   order.paymentStatus === 'Refunded' ? 'bg-purple-100 text-purple-800 border border-purple-300' :
+                                   order.paymentStatus === 'Paid' ? 'bg-green-100 text-green-800 border border-green-300' :
+                                   'bg-amber-100 text-amber-800 border border-amber-300'
+                                 }`}>
+                                   Payment: {order.paymentStatus}
+                                 </span>
+                               </div>
+
+                               {/* Contact & Shipping Address Details */}
+                               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-gray-700 pt-1">
+                                 <div className="flex items-center gap-2 bg-gray-50 p-2.5 rounded-lg border border-gray-100">
+                                   <Phone size={16} className="text-tea-green shrink-0" />
+                                   <div>
+                                     <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Mobile / Contact</span>
+                                     <a href={customerMobile ? `tel:${customerMobile}` : '#'} className="font-semibold text-gray-900 hover:text-tea-dark">
+                                       {customerMobile || 'Not provided'}
+                                     </a>
+                                   </div>
+                                 </div>
+
+                                 <div className="flex items-start gap-2 bg-gray-50 p-2.5 rounded-lg border border-gray-100">
+                                   <MapPin size={16} className="text-tea-red shrink-0 mt-0.5" />
+                                   <div>
+                                     <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Delivery Address</span>
+                                     <span className="font-medium text-gray-900 break-words">{customerAddress || 'Address not provided'}</span>
+                                   </div>
+                                 </div>
+                               </div>
+                             </div>
+
+                             {/* Right Column: Amount, Status Dropdown & Action Buttons */}
+                             <div className="flex flex-col sm:flex-row lg:flex-col lg:items-end justify-between gap-3 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0">
+                               <div className="lg:text-right">
+                                 <span className="text-2xl font-black text-gray-900">₹{order.totalAmount}</span>
+                                 <span className="text-xs text-gray-500 block">Method: {order.paymentMethod}</span>
+                               </div>
+
+                               <div className="flex items-center gap-2 flex-wrap">
+                                 <select 
+                                   value={order.status} 
+                                   onChange={e => updateOrderStatus(order.id, e.target.value as any)} 
+                                   className={`border rounded-lg px-3 py-1.5 text-xs font-bold outline-none cursor-pointer shadow-sm ${
+                                     order.status === 'Cancelled' ? 'bg-red-50 text-red-700 border-red-300' :
+                                     order.status === 'Delivered' ? 'bg-green-50 text-green-700 border-green-300' :
+                                     order.status === 'Shipped' ? 'bg-blue-50 text-blue-700 border-blue-300' :
+                                     'bg-amber-50 text-amber-800 border-amber-300'
+                                   }`}
+                                 >
+                                     <option value="Processing">Processing</option>
+                                     <option value="Shipped">Shipped</option>
+                                     <option value="Delivered">Delivered</option>
+                                     <option value="Cancelled">Cancelled (Auto Refund)</option>
+                                 </select>
+
+                                 <button 
+                                   onClick={() => setViewInvoice(order)} 
+                                   className="bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 border"
+                                   title="View & Print Invoice"
+                                 >
+                                   <FileText size={14} /> Invoice
+                                 </button>
+
+                                 <button 
+                                   onClick={() => deleteOrder(order.id)} 
+                                   className="text-red-500 hover:text-red-700 p-1.5 rounded hover:bg-red-50 transition" 
+                                   title="Delete Order"
+                                 >
+                                   <Trash2 size={16} />
+                                 </button>
+                               </div>
+                             </div>
+                           </div>
+
+                           {/* Bottom Bar: Meta info & Items ordered */}
+                           <div className="pt-1 flex flex-col md:flex-row md:items-center justify-between gap-2 text-xs text-gray-500">
+                             <div className="flex items-center gap-2 flex-wrap">
+                               <span className="font-mono bg-gray-100 px-2 py-0.5 rounded font-semibold text-gray-700">ID: {order.id}</span>
+                               <span>•</span>
+                               <span>Date: {order.date}</span>
+                               {order.invoiceNumber && (
+                                 <>
+                                   <span>•</span>
+                                   <span>Inv: {order.invoiceNumber}</span>
+                                 </>
+                               )}
+                               {order.transactionId && (
+                                 <>
+                                   <span>•</span>
+                                   <span className="font-mono text-gray-600">Txn: {order.transactionId}</span>
+                                 </>
+                               )}
+                             </div>
+
+                             {/* Items List Pill */}
+                             {order.items && order.items.length > 0 && (
+                               <div className="flex items-center gap-1.5 text-gray-700 font-medium bg-tea-green/5 px-3 py-1 rounded-md border border-tea-green/20">
+                                 <Package size={14} className="text-tea-dark shrink-0" />
+                                 <span className="truncate max-w-md">
+                                   <strong className="text-tea-dark">Items:</strong> {order.items.map(i => `${i.quantity}x ${i.name || 'Tea'} (${i.weight || ''})`).join(', ')}
+                                 </span>
+                               </div>
+                             )}
+                           </div>
+                         </div>
+                       );
+                     })}
+                   </div>
+                 )}
              </div>
         )}
 

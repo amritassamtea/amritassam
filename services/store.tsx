@@ -27,6 +27,7 @@ interface StoreContextType {
   addPurchaseOrder: (po: PurchaseOrder) => Promise<void>;
   deletePurchaseOrder: (poId: string) => Promise<void>;
   receivePurchaseOrder: (poId: string) => Promise<void>;
+  updatePurchaseOrderBill: (poId: string, billUrl: string) => Promise<void>;
   updateOrderStatus: (orderId: string, status: Order['status']) => Promise<void>;
   updatePaymentStatus: (orderId: string, status: Order['paymentStatus']) => Promise<void>;
   approveDistributor: (userId: string) => Promise<void>;
@@ -256,6 +257,72 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
       }
   };
 
+  const fetchPurchaseOrders = async () => {
+    try {
+      const { data: posData, error } = await supabase
+        .from('purchase_orders')
+        .select(`
+            *,
+            purchase_order_items (
+                *,
+                products (name)
+            )
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.warn("Joined purchase_orders query failed, trying simple query:", error);
+        const { data: simplePOs } = await supabase
+          .from('purchase_orders')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (simplePOs && simplePOs.length > 0) {
+          const mappedSimple = simplePOs.map((po: any) => ({
+            id: po.id,
+            poNumber: po.po_number || `PO-${po.id}`,
+            supplierName: po.supplier_name || 'Supplier',
+            supplierAddress: po.supplier_address || '',
+            supplierMobile: po.supplier_mobile || '',
+            supplierEmail: po.supplier_email || '',
+            billUrl: po.bill_url || '',
+            date: po.created_at ? new Date(po.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+            status: po.status || 'Pending',
+            totalAmount: Number(po.total_amount) || 0,
+            items: []
+          }));
+          setPurchaseOrders(mappedSimple);
+        }
+        return;
+      }
+
+      if (posData) {
+        const mappedPOs = posData.map((po: any) => ({
+          id: po.id,
+          poNumber: po.po_number || `PO-${po.id}`,
+          supplierName: po.supplier_name || 'Supplier',
+          supplierAddress: po.supplier_address || '',
+          supplierMobile: po.supplier_mobile || '',
+          supplierEmail: po.supplier_email || '',
+          billUrl: po.bill_url || '',
+          date: po.created_at ? new Date(po.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          status: po.status || 'Pending',
+          totalAmount: Number(po.total_amount) || 0,
+          items: (po.purchase_order_items || []).map((item: any) => ({
+            productId: item.product_id,
+            productName: item.products?.name || 'Tea Product',
+            quantity: item.quantity,
+            unitCost: item.unit_cost,
+            totalCost: item.total_cost
+          }))
+        }));
+        setPurchaseOrders(mappedPOs);
+      }
+    } catch (err) {
+      console.error("fetchPurchaseOrders error:", err);
+    }
+  };
+
   // Fetch Site Settings from DB
   const fetchSettings = async () => {
       try {
@@ -323,6 +390,7 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
     fetchProducts();
     fetchReviews();
     fetchSettings(); // Load Settings from DB
+    fetchPurchaseOrders(); // Sync purchase orders from DB
 
     // Eagerly fetch relevant data if user is cached in local storage
     try {
@@ -331,6 +399,7 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
         const parsed = JSON.parse(cached);
         if (parsed) {
           fetchOrders();
+          fetchPurchaseOrders();
           if (parsed.role === 'ADMIN') {
             fetchUsers();
           }
@@ -357,6 +426,7 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
           });
           fetchOrders();
           fetchUsers();
+          fetchPurchaseOrders();
       }
     });
 
@@ -376,8 +446,10 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
                     if(data.role === 'ADMIN') {
                         fetchOrders();
                         fetchUsers();
+                        fetchPurchaseOrders();
                     } else {
                         fetchOrders();
+                        fetchPurchaseOrders();
                     }
                 }
             });
@@ -542,7 +614,13 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
 
   const clearCart = () => setCart([]);
 
-  const placeOrder = async (paymentMethod: 'UPI' | 'Card' | 'COD', address: string, paymentStatus: 'Pending' | 'Paid' = 'Pending', transactionId?: string) => {
+  const placeOrder = async (
+    paymentMethod: 'UPI' | 'Card' | 'COD', 
+    address: string, 
+    paymentStatus: 'Pending' | 'Paid' = 'Pending', 
+    transactionId?: string,
+    recipientDetails?: { name?: string; mobile?: string }
+  ) => {
     if (!user) return;
 
     for (const item of cart) {
@@ -602,11 +680,14 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
          }
     }
 
+    const finalName = recipientDetails?.name ? `${recipientDetails.name} (by ${user.name})` : user.name;
+    const finalMobile = recipientDetails?.mobile || user.mobile;
+
     const newOrderObj: Order = {
       id: orderData.id,
       userId: user.id,
-      userName: user.name,
-      userMobile: user.mobile,
+      userName: finalName,
+      userMobile: finalMobile,
       userAddress: address || user.address || '',
       userGst: user.gstNumber || '',
       items: cart.map(item => ({ ...item })),
@@ -660,29 +741,42 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
   };
 
   const addPurchaseOrder = async (po: PurchaseOrder) => {
-     const { data } = await supabase.from('purchase_orders').insert({
-         po_number: po.poNumber,
-         supplier_name: po.supplierName,
-         status: po.status,
-         total_amount: po.totalAmount
-     }).select().single();
+     try {
+       const { data } = await supabase.from('purchase_orders').insert({
+           po_number: po.poNumber,
+           supplier_name: po.supplierName,
+           supplier_address: po.supplierAddress || null,
+           supplier_mobile: po.supplierMobile || null,
+           supplier_email: po.supplierEmail || null,
+           bill_url: po.billUrl || null,
+           status: po.status,
+           total_amount: po.totalAmount
+       }).select().single();
 
-     if (data) {
-         const items = po.items.map(i => ({
-             po_id: data.id,
-             product_id: i.productId,
-             quantity: i.quantity,
-             unit_cost: i.unitCost,
-             total_cost: i.totalCost
-         }));
-         await supabase.from('purchase_order_items').insert(items);
-         
-         const { data: pos } = await supabase.from('purchase_orders').select('*, purchase_order_items(*)');
-         setPurchaseOrders([po, ...purchaseOrders]);
+       if (data) {
+           const items = po.items.map(i => ({
+               po_id: data.id,
+               product_id: i.productId,
+               quantity: i.quantity,
+               unit_cost: i.unitCost,
+               total_cost: i.totalCost
+           }));
+           await supabase.from('purchase_order_items').insert(items);
+           await fetchPurchaseOrders();
+           return;
+       }
+     } catch (e) {
+       console.warn("Database insert for PO failed or table columns missing, using local state:", e);
      }
+     setPurchaseOrders(prev => [po, ...prev.filter(p => p.id !== po.id)]);
   };
 
   const deletePurchaseOrder = async (poId: string) => {
+      try {
+        await supabase.from('purchase_orders').delete().eq('id', poId);
+      } catch (e) {
+        console.warn("Delete PO failed:", e);
+      }
       setPurchaseOrders(prevPOs => prevPOs.filter(p => p.id !== poId));
   };
 
@@ -699,10 +793,24 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
      }
 
      const updatedPO = { ...po, status: 'Received' as const };
+     try {
+       await supabase.from('purchase_orders').update({ status: 'Received' }).eq('id', poId);
+     } catch (e) {
+       console.warn("Update PO status failed:", e);
+     }
      const updatedPOs = [...purchaseOrders];
      updatedPOs[poIndex] = updatedPO;
      setPurchaseOrders(updatedPOs);
      fetchProducts();
+  };
+
+  const updatePurchaseOrderBill = async (poId: string, billUrl: string) => {
+     try {
+       await supabase.from('purchase_orders').update({ bill_url: billUrl }).eq('id', poId);
+     } catch (e) {
+       console.warn("Update PO bill failed:", e);
+     }
+     setPurchaseOrders(prev => prev.map(p => p.id === poId ? { ...p, billUrl } : p));
   };
 
   const updateOrderStatus = async (orderId: string, status: Order['status']) => {
@@ -915,7 +1023,7 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
     <StoreContext.Provider value={{
       user, products, orders, purchaseOrders, cart, users, reviews, invoiceSettings, paymentSettings, brandAssets,
       login, logout, register, addUser, addToCart, removeFromCart, clearCart,
-      placeOrder, deleteOrder, addOrder, addPurchaseOrder, deletePurchaseOrder, receivePurchaseOrder,
+      placeOrder, deleteOrder, addOrder, addPurchaseOrder, deletePurchaseOrder, receivePurchaseOrder, updatePurchaseOrderBill,
       updateOrderStatus, updatePaymentStatus, approveDistributor, 
       updateProduct, deleteProduct, addProduct, updateStock, updateInvoiceSettings, updatePaymentSettings, updateBrandAssets,
       addReview, updateReview, deleteReview, addFakeReview, clearOnlineOrders, updateUserPassword

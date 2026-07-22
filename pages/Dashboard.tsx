@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useStore } from '../services/store';
 import { ReviewModal } from '../components/ReviewModal';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
-import { Package, DollarSign, Users, CheckCircle, XCircle, Printer, AlertTriangle, FileText, PlusCircle, Trash2, Settings, Save, TrendingUp, ClipboardList, CreditCard, Download, UploadCloud, Image as ImageIcon, RotateCcw, KeyRound, Star, MessageSquare, Edit, Phone, MapPin, User as UserIcon } from 'lucide-react';
+import { Package, DollarSign, Users, CheckCircle, XCircle, Printer, AlertTriangle, FileText, PlusCircle, Trash2, Settings, Save, TrendingUp, ClipboardList, CreditCard, Download, UploadCloud, Image as ImageIcon, RotateCcw, KeyRound, Star, MessageSquare, Edit, Phone, MapPin, User as UserIcon, Mail, Paperclip, Eye, ExternalLink, FileCheck, Search, Filter, Calendar, FileSpreadsheet, X } from 'lucide-react';
 import { Product, Order, User, PurchaseItem, PurchaseOrder, InvoiceSettings, PaymentSettings, BrandAssets, Role, Review } from '../types';
 
 // --- UTILS ---
@@ -34,6 +34,27 @@ const exportToCSV = (data: any[], filename: string) => {
       link.click();
       document.body.removeChild(link);
     }
+};
+
+const getOrderCustomerDetails = (order: Order, usersList: User[]) => {
+  const matchingUser = usersList.find(u => u.id === order.userId);
+  const name = order.userName || matchingUser?.name || 'Customer';
+  const mobile = order.userMobile || matchingUser?.mobile || 'N/A';
+  
+  let city = 'N/A';
+  if (order.userAddress) {
+    const cleanAddr = order.userAddress.replace(/^Recipient:.*?\|\s*/i, '');
+    const parts = cleanAddr.split(',');
+    if (parts.length >= 2) {
+      const candidate = parts[parts.length - 2]?.trim();
+      if (candidate && candidate.length > 1) {
+        city = candidate;
+      }
+    } else if (parts.length === 1) {
+      city = parts[0].trim();
+    }
+  }
+  return { name, mobile, city, fullAddress: order.userAddress || 'N/A' };
 };
 
 // --- INVOICE COMPONENT ---
@@ -493,12 +514,33 @@ const ManualOrderForm = ({ products, users, onClose, onSubmit }: { products: Pro
 
 const PurchaseOrderForm = ({ products, onClose, onSubmit }: { products: Product[], onClose: () => void, onSubmit: (po: PurchaseOrder) => void }) => {
   const [supplier, setSupplier] = useState('');
+  const [supplierAddress, setSupplierAddress] = useState('');
+  const [supplierMobile, setSupplierMobile] = useState('');
+  const [supplierEmail, setSupplierEmail] = useState('');
+  const [billUrl, setBillUrl] = useState('');
+  const [billFileName, setBillFileName] = useState('');
   const [poNumber, setPoNumber] = useState(`PO-${new Date().getFullYear()}-${Math.floor(Math.random()*1000)}`);
   const [items, setItems] = useState<PurchaseItem[]>([]);
   
   const [selProd, setSelProd] = useState('');
   const [qty, setQty] = useState(100);
   const [cost, setCost] = useState(0);
+
+  const handleBillUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        alert("File size exceeds 5MB limit. Please upload a smaller image or document.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setBillUrl(reader.result as string);
+        setBillFileName(file.name);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const addItem = () => {
     const p = products.find(x => x.id === selProd);
@@ -509,11 +551,18 @@ const PurchaseOrderForm = ({ products, onClose, onSubmit }: { products: Product[
   };
 
   const handleSubmit = () => {
-    if(!supplier || items.length === 0) return;
+    if(!supplier || items.length === 0) {
+      alert("Please provide Supplier Name and add at least one product item.");
+      return;
+    }
     const po: PurchaseOrder = {
       id: `po-${Date.now()}`,
       poNumber,
       supplierName: supplier,
+      supplierAddress,
+      supplierMobile,
+      supplierEmail,
+      billUrl,
       date: new Date().toISOString().split('T')[0],
       status: 'Pending',
       items,
@@ -523,59 +572,127 @@ const PurchaseOrderForm = ({ products, onClose, onSubmit }: { products: Product[
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white p-6 rounded-lg w-full max-w-2xl">
-        <div className="flex justify-between mb-4">
-          <h3 className="font-bold text-xl">New Purchase Order</h3>
-          <button onClick={onClose}><XCircle /></button>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-white p-6 rounded-xl w-full max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl animate-fade-in">
+        <div className="flex justify-between items-center mb-5 border-b pb-3">
+          <h3 className="font-extrabold text-xl text-tea-dark flex items-center gap-2">
+            <ClipboardList className="text-tea-green" /> New Purchase Order
+          </h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-red-500 transition"><XCircle size={22} /></button>
         </div>
-        <div className="grid grid-cols-2 gap-4 mb-4">
-           <input className="border p-2 rounded" placeholder="Supplier Name" value={supplier} onChange={e => setSupplier(e.target.value)} />
-           <input className="border p-2 rounded" placeholder="PO Number" value={poNumber} onChange={e => setPoNumber(e.target.value)} />
+
+        {/* Supplier & PO Details Form */}
+        <div className="space-y-3 mb-5">
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+             <div>
+               <label className="block text-xs font-bold text-gray-700 mb-1">Supplier / Vendor Name *</label>
+               <input className="w-full border p-2.5 rounded-lg text-sm focus:ring-2 focus:ring-tea-green outline-none" placeholder="e.g. Assam Tea Estates Ltd." value={supplier} onChange={e => setSupplier(e.target.value)} required />
+             </div>
+             <div>
+               <label className="block text-xs font-bold text-gray-700 mb-1">PO Number</label>
+               <input className="w-full border p-2.5 rounded-lg text-sm bg-gray-50 font-mono font-bold" value={poNumber} onChange={e => setPoNumber(e.target.value)} />
+             </div>
+           </div>
+
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+             <div>
+               <label className="block text-xs font-bold text-gray-700 mb-1">Supplier Mobile No.</label>
+               <input className="w-full border p-2.5 rounded-lg text-sm focus:ring-2 focus:ring-tea-green outline-none" placeholder="e.g. 9876543210" value={supplierMobile} onChange={e => setSupplierMobile(e.target.value)} />
+             </div>
+             <div>
+               <label className="block text-xs font-bold text-gray-700 mb-1">Supplier Email ID</label>
+               <input type="email" className="w-full border p-2.5 rounded-lg text-sm focus:ring-2 focus:ring-tea-green outline-none" placeholder="e.g. supplier@assamtea.com" value={supplierEmail} onChange={e => setSupplierEmail(e.target.value)} />
+             </div>
+           </div>
+
+           <div>
+             <label className="block text-xs font-bold text-gray-700 mb-1">Supplier Address</label>
+             <input className="w-full border p-2.5 rounded-lg text-sm focus:ring-2 focus:ring-tea-green outline-none" placeholder="e.g. Dibrugarh, Tea Garden Estate, Assam - 786001" value={supplierAddress} onChange={e => setSupplierAddress(e.target.value)} />
+           </div>
+
+           {/* Supplier Bill / Invoice File Upload */}
+           <div className="border-2 border-dashed border-gray-300 rounded-lg p-3 bg-gray-50 hover:bg-gray-100 transition">
+             <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center justify-between">
+               <span className="flex items-center gap-1.5"><UploadCloud size={16} className="text-tea-dark" /> Upload Supplier Bill / Invoice Document</span>
+               <span className="text-[11px] text-gray-400 font-normal">Formats: JPG, PNG, PDF (Max 5MB)</span>
+             </label>
+             <input type="file" accept="image/*,.pdf" onChange={handleBillUpload} className="block w-full text-xs text-gray-500 file:mr-4 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-tea-dark file:text-white hover:file:bg-black cursor-pointer" />
+             {billUrl && (
+               <div className="mt-2 flex items-center justify-between text-xs bg-green-50 border border-green-200 text-green-800 p-2 rounded">
+                 <span className="font-medium truncate flex items-center gap-1"><FileCheck size={14} className="text-green-600" /> Attached: {billFileName || 'Supplier_Bill.pdf'}</span>
+                 <button type="button" onClick={() => { setBillUrl(''); setBillFileName(''); }} className="text-red-600 hover:underline text-[11px] font-bold">Remove</button>
+               </div>
+             )}
+           </div>
         </div>
-        
-        <div className="bg-gray-50 p-4 rounded mb-4 flex gap-2 items-end">
-           <div className="flex-1">
-             <label className="text-xs font-bold">Product</label>
-             <select className="w-full border p-2 rounded" value={selProd} onChange={e => {
+
+        {/* Product Items Adding */}
+        <div className="bg-amber-50/60 border border-amber-200 p-3.5 rounded-lg mb-4 flex flex-wrap gap-2 items-end">
+           <div className="flex-1 min-w-[180px]">
+             <label className="text-xs font-bold text-amber-900 block mb-1">Select Tea Product</label>
+             <select className="w-full border p-2 rounded-lg text-sm focus:ring-2 focus:ring-tea-green" value={selProd} onChange={e => {
                setSelProd(e.target.value);
                const p = products.find(x => x.id === e.target.value);
                if(p) setCost(p.costPrice);
              }}>
-               <option value="">Select</option>
-               {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+               <option value="">-- Choose Product --</option>
+               {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.weight})</option>)}
              </select>
            </div>
            <div className="w-24">
-             <label className="text-xs font-bold">Qty</label>
-             <input type="number" className="w-full border p-2 rounded" value={qty} onChange={e => setQty(Number(e.target.value))} />
+             <label className="text-xs font-bold text-amber-900 block mb-1">Qty (Kg/Pcs)</label>
+             <input type="number" min="1" className="w-full border p-2 rounded-lg text-sm" value={qty} onChange={e => setQty(Number(e.target.value))} />
            </div>
-           <div className="w-24">
-             <label className="text-xs font-bold">Unit Cost</label>
-             <input type="number" className="w-full border p-2 rounded" value={cost} onChange={e => setCost(Number(e.target.value))} />
+           <div className="w-28">
+             <label className="text-xs font-bold text-amber-900 block mb-1">Unit Cost (₹)</label>
+             <input type="number" min="0" className="w-full border p-2 rounded-lg text-sm" value={cost} onChange={e => setCost(Number(e.target.value))} />
            </div>
-           <button onClick={addItem} className="bg-tea-dark text-white px-4 py-2 rounded mb-[1px]">Add</button>
+           <button onClick={addItem} className="bg-tea-dark hover:bg-black text-white px-4 py-2 rounded-lg text-sm font-bold transition">Add Item</button>
         </div>
 
-        <div className="max-h-40 overflow-y-auto mb-4">
+        {/* Items Table */}
+        <div className="max-h-48 overflow-y-auto mb-4 border rounded-lg">
           <table className="w-full text-sm">
-             <thead><tr className="bg-gray-100"><th className="p-2 text-left">Product</th><th>Qty</th><th>Cost</th><th>Total</th></tr></thead>
-             <tbody>
-               {items.map((i, idx) => (
-                 <tr key={idx} className="border-b">
-                   <td className="p-2">{i.productName}</td>
-                   <td className="text-center">{i.quantity}</td>
-                   <td className="text-right">₹{i.unitCost}</td>
-                   <td className="text-right">₹{i.totalCost}</td>
-                 </tr>
-               ))}
+             <thead className="bg-gray-100 text-xs font-bold text-gray-700 uppercase">
+               <tr>
+                 <th className="p-2.5 text-left">Product</th>
+                 <th className="p-2.5 text-center">Qty</th>
+                 <th className="p-2.5 text-right">Unit Cost</th>
+                 <th className="p-2.5 text-right">Total</th>
+                 <th className="p-2.5 text-center"></th>
+               </tr>
+             </thead>
+             <tbody className="divide-y text-xs">
+               {items.length === 0 ? (
+                 <tr><td colSpan={5} className="p-4 text-center text-gray-400">No items added to PO yet. Select product above.</td></tr>
+               ) : (
+                 items.map((i, idx) => (
+                   <tr key={idx} className="hover:bg-gray-50">
+                     <td className="p-2.5 font-semibold text-gray-800">{i.productName}</td>
+                     <td className="p-2.5 text-center font-bold">{i.quantity}</td>
+                     <td className="p-2.5 text-right text-gray-600">₹{i.unitCost}</td>
+                     <td className="p-2.5 text-right font-bold text-tea-dark">₹{i.totalCost}</td>
+                     <td className="p-2.5 text-center">
+                        <button onClick={() => setItems(items.filter((_, index) => index !== idx))} className="text-red-500 hover:text-red-700 p-1"><Trash2 size={14} /></button>
+                     </td>
+                   </tr>
+                 ))
+               )}
              </tbody>
           </table>
         </div>
         
         <div className="flex justify-between items-center border-t pt-4">
-           <div className="font-bold text-xl">Total: ₹{items.reduce((sum, i) => sum + i.totalCost, 0)}</div>
-           <button onClick={handleSubmit} className="bg-green-600 text-white px-6 py-2 rounded font-bold">Generate PO</button>
+           <div>
+             <span className="text-xs text-gray-500 block">Total PO Amount</span>
+             <span className="font-black text-2xl text-tea-dark">₹{items.reduce((sum, i) => sum + i.totalCost, 0).toLocaleString()}</span>
+           </div>
+           <div className="flex gap-2">
+             <button onClick={onClose} className="px-4 py-2 border rounded-lg text-sm font-bold text-gray-600 hover:bg-gray-100">Cancel</button>
+             <button onClick={handleSubmit} className="bg-green-600 hover:bg-green-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow transition flex items-center gap-1.5">
+               <CheckCircle size={16} /> Generate PO
+             </button>
+           </div>
         </div>
       </div>
     </div>
@@ -585,13 +702,16 @@ const PurchaseOrderForm = ({ products, onClose, onSubmit }: { products: Product[
 export const Dashboard = () => {
   const { 
     user, orders, products, users, invoiceSettings, purchaseOrders, paymentSettings, brandAssets, reviews,
-    updateInvoiceSettings, addUser, addOrder, addPurchaseOrder, receivePurchaseOrder,
+    updateInvoiceSettings, addUser, addOrder, addPurchaseOrder, receivePurchaseOrder, updatePurchaseOrderBill,
     updatePaymentStatus, approveDistributor, updateOrderStatus, deleteOrder, deletePurchaseOrder,
     addProduct, deleteProduct, updateProduct, updateStock, updatePaymentSettings, updateBrandAssets,
     clearOnlineOrders, updateUserPassword, updateReview, deleteReview, addFakeReview
   } = useStore();
   
   const [activeTab, setActiveTab] = useState('OVERVIEW');
+  const [paymentSubTab, setPaymentSubTab] = useState<'RAZORPAY' | 'COD'>('RAZORPAY');
+  const [paymentStartDate, setPaymentStartDate] = useState('');
+  const [paymentEndDate, setPaymentEndDate] = useState('');
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [viewInvoice, setViewInvoice] = useState<Order | null>(null);
   const [showManualOrder, setShowManualOrder] = useState(false);
@@ -601,6 +721,79 @@ export const Dashboard = () => {
   const [reviewProduct, setReviewProduct] = useState<Product | null>(null);
   const [editingReview, setEditingReview] = useState<Review | null>(null);
   const [showAddReview, setShowAddReview] = useState(false);
+  const [viewingBillUrl, setViewingBillUrl] = useState<{ url: string; poNumber: string; supplierName: string } | null>(null);
+
+  // Purchase Order Filtering & Export State
+  const [poSupplierFilter, setPoSupplierFilter] = useState('');
+  const [poFromDate, setPoFromDate] = useState('');
+  const [poToDate, setPoToDate] = useState('');
+  const [poStatusFilter, setPoStatusFilter] = useState('ALL');
+
+  const filteredPurchaseOrders = React.useMemo(() => {
+    return purchaseOrders.filter(po => {
+      if (poSupplierFilter.trim()) {
+        const query = poSupplierFilter.toLowerCase().trim();
+        const matchName = po.supplierName?.toLowerCase().includes(query);
+        const matchPoNo = po.poNumber?.toLowerCase().includes(query);
+        const matchMobile = po.supplierMobile?.toLowerCase().includes(query);
+        if (!matchName && !matchPoNo && !matchMobile) return false;
+      }
+      if (poStatusFilter !== 'ALL' && po.status !== poStatusFilter) {
+        return false;
+      }
+      if (poFromDate && po.date < poFromDate) {
+        return false;
+      }
+      if (poToDate && po.date > poToDate) {
+        return false;
+      }
+      return true;
+    });
+  }, [purchaseOrders, poSupplierFilter, poStatusFilter, poFromDate, poToDate]);
+
+  const exportPOsToCSV = () => {
+    if (filteredPurchaseOrders.length === 0) {
+      alert("No purchase orders found to export based on current filters.");
+      return;
+    }
+    const headers = [
+      "PO Number",
+      "Supplier Name",
+      "Supplier Mobile",
+      "Supplier Email",
+      "Supplier Address",
+      "Date",
+      "Status",
+      "Items Details",
+      "Total Amount (INR)",
+      "Bill Attached"
+    ];
+
+    const rows = filteredPurchaseOrders.map(po => {
+      const itemsStr = po.items ? po.items.map(i => `${i.productName} (Qty: ${i.quantity}, Unit Cost: ₹${i.unitCost}, Total: ₹${i.totalCost})`).join(" | ") : "";
+      return [
+        `"${po.poNumber || ''}"`,
+        `"${(po.supplierName || '').replace(/"/g, '""')}"`,
+        `"${po.supplierMobile || ''}"`,
+        `"${po.supplierEmail || ''}"`,
+        `"${(po.supplierAddress || '').replace(/"/g, '""')}"`,
+        `"${po.date || ''}"`,
+        `"${po.status || ''}"`,
+        `"${itemsStr.replace(/"/g, '""')}"`,
+        `"${po.totalAmount || 0}"`,
+        `"${po.billUrl ? 'Yes' : 'No'}"`
+      ];
+    });
+
+    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Purchase_Orders_Report_${poSupplierFilter ? poSupplierFilter + '_' : ''}${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   // Settings state
   const [settingsForm, setSettingsForm] = useState<InvoiceSettings>(invoiceSettings);
@@ -700,13 +893,66 @@ export const Dashboard = () => {
     const grossProfit = totalRevenue - totalCOGS;
     const profitMargin = totalRevenue > 0 ? ((grossProfit / totalRevenue) * 100).toFixed(1) : '0';
 
-    // RAZORPAY / PAYMENT STATS
-    const onlineOrders = orders.filter(o => o.paymentMethod !== 'COD' && o.paymentStatus === 'Paid');
-    const totalOnlineRevenue = onlineOrders.reduce((acc, curr) => acc + curr.totalAmount, 0);
-    const totalCOD = orders.filter(o => o.paymentMethod === 'COD').reduce((acc, curr) => acc + curr.totalAmount, 0);
+    // RAZORPAY / ONLINE PAYMENT STATS WITH DATE RANGE FILTER
+    const filteredOrdersForPayments = orders.filter(o => {
+      if (paymentStartDate && o.date < paymentStartDate) return false;
+      if (paymentEndDate && o.date > paymentEndDate) return false;
+      return true;
+    });
+
+    const onlineOrders = filteredOrdersForPayments.filter(o => o.paymentMethod !== 'COD' && o.paymentStatus === 'Paid');
+    const allOnlineOrders = filteredOrdersForPayments.filter(o => o.paymentMethod !== 'COD');
+    
+    // Product MRP Sum for online orders (Incl. 5% GST)
+    const razorpayMrpTotal = Math.round(onlineOrders.reduce((sum, order) => {
+      const itemMrpSum = order.items?.reduce((iSum, i) => iSum + ((i.mrp || 0) * i.quantity), 0) || order.totalAmount;
+      return sum + itemMrpSum;
+    }, 0));
+
+    // Base Product MRP (Excl. 5% GST) & GST 5% Amount
+    const razorpayBaseMrpTotal = Math.round(razorpayMrpTotal / 1.05);
+    const razorpayGstTotal = razorpayMrpTotal - razorpayBaseMrpTotal;
+
+    // Razorpay Gateway Fee (5%)
+    const razorpayFeeTotal = Math.round(onlineOrders.reduce((sum, o) => sum + (o.totalAmount * 0.05), 0));
+
+    // Total Captured = Product MRP + Razorpay Fee (5%)
+    const razorpayTotalCaptured = razorpayMrpTotal + razorpayFeeTotal;
+
+    // Pending Settlement = ONLY Product MRP (incl. GST)
+    const razorpayPendingSettlement = razorpayMrpTotal;
+
+    // CASH ON DELIVERY (COD) STATS
+    const codOrders = filteredOrdersForPayments.filter(o => o.paymentMethod === 'COD');
+    
+    // Product MRP Sum for COD orders (Incl. 5% GST)
+    const codMrpTotal = Math.round(codOrders.reduce((sum, order) => {
+      const itemMrpSum = order.items?.reduce((iSum, i) => iSum + ((i.mrp || 0) * i.quantity), 0) || order.totalAmount;
+      return sum + itemMrpSum;
+    }, 0));
+
+    // Base Product MRP (Excl. 5% GST) & GST 5% Amount for COD
+    const codBaseMrpTotal = Math.round(codMrpTotal / 1.05);
+    const codGstTotal = codMrpTotal - codBaseMrpTotal;
+
+    // Shipping & Handling charges for COD (₹50 per COD order)
+    const codShippingTotal = codOrders.length * 50;
+
+    // Total Captured for COD = Product MRP + Shipping Charges
+    const codTotalCaptured = codMrpTotal + codShippingTotal;
+
+    // COD Breakdown (Delivered vs Pending Collection)
+    const codDeliveredMrp = Math.round(codOrders.filter(o => o.status === 'Delivered').reduce((sum, o) => {
+      return sum + (o.items?.reduce((iSum, i) => iSum + ((i.mrp || 0) * i.quantity), 0) || o.totalAmount);
+    }, 0));
+
+    const codPendingMrp = Math.round(codOrders.filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled').reduce((sum, o) => {
+      return sum + (o.items?.reduce((iSum, i) => iSum + ((i.mrp || 0) * i.quantity), 0) || o.totalAmount);
+    }, 0));
+
     const paymentVolumeData = [
-       { name: 'Razorpay (Online)', value: totalOnlineRevenue, color: '#0052cc' },
-       { name: 'Cash on Delivery', value: totalCOD, color: '#eab308' }
+       { name: 'Razorpay (Online)', value: razorpayTotalCaptured, color: '#0052cc' },
+       { name: 'Cash on Delivery', value: codTotalCaptured, color: '#eab308' }
     ];
 
     const TABS = ['OVERVIEW', 'REPORTS', 'PAYMENTS', 'ORDERS', 'PURCHASE', 'INVENTORY', 'PRODUCTS', 'USERS', 'REVIEWS', 'SETTINGS'];
@@ -814,56 +1060,382 @@ export const Dashboard = () => {
 
         {activeTab === 'PAYMENTS' && (
            <div className="animate-fade-in space-y-6">
-              <div className="flex justify-between items-center">
-                 <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                    <CreditCard className="text-blue-600" /> Razorpay Payment Dashboard
-                 </h3>
-                 <div className="flex gap-2">
-                     <button 
-                        onClick={() => {
-                            if(window.confirm('Are you sure you want to clear all online transaction history? This cannot be undone.')) {
-                                clearOnlineOrders();
-                            }
-                        }}
-                        className="bg-red-600 text-white px-3 py-1 rounded text-sm font-bold flex items-center gap-1 hover:bg-red-700"
-                     >
-                        <RotateCcw size={14} /> Reset Data
-                     </button>
-                     <button 
-                        onClick={() => {
-                            const data = onlineOrders.map(o => ({
-                                Date: o.date,
-                                PaymentID: o.transactionId || 'N/A',
-                                OrderID: o.id,
-                                Method: o.paymentMethod,
-                                Amount: o.totalAmount,
-                                Status: 'Captured'
-                            }));
-                            exportToCSV(data, 'payments_export.csv');
-                        }}
-                        className="bg-green-600 text-white px-3 py-1 rounded text-sm font-bold flex items-center gap-1 hover:bg-green-700"
-                     >
-                        <Download size={14} /> Export Excel
-                     </button>
-                     <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold border border-blue-200">
-                        Live Mode (Mock)
-                     </span>
+              {/* Date Filter Bar */}
+              <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-wrap items-center justify-between gap-4">
+                 <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-xs font-bold text-gray-800 flex items-center gap-1">
+                       📅 Export & Filter Date Range:
+                    </span>
+                    <div className="flex items-center gap-2">
+                       <label className="text-[11px] font-semibold text-gray-500">From:</label>
+                       <input 
+                          type="date" 
+                          value={paymentStartDate} 
+                          onChange={e => setPaymentStartDate(e.target.value)}
+                          className="border rounded px-2.5 py-1 text-xs outline-none focus:ring-1 focus:ring-tea-green font-medium"
+                       />
+                    </div>
+                    <div className="flex items-center gap-2">
+                       <label className="text-[11px] font-semibold text-gray-500">To:</label>
+                       <input 
+                          type="date" 
+                          value={paymentEndDate} 
+                          onChange={e => setPaymentEndDate(e.target.value)}
+                          className="border rounded px-2.5 py-1 text-xs outline-none focus:ring-1 focus:ring-tea-green font-medium"
+                       />
+                    </div>
+                    {(paymentStartDate || paymentEndDate) && (
+                       <button 
+                          onClick={() => { setPaymentStartDate(''); setPaymentEndDate(''); }}
+                          className="text-xs text-red-600 hover:text-red-800 font-bold px-2 py-1 bg-red-50 rounded border border-red-200"
+                       >
+                          Clear Filter
+                       </button>
+                    )}
+                    <button 
+                       onClick={() => {
+                          const now = new Date();
+                          const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+                          const today = now.toISOString().split('T')[0];
+                          setPaymentStartDate(firstDay);
+                          setPaymentEndDate(today);
+                       }}
+                       className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-2.5 py-1 rounded border"
+                    >
+                       This Month
+                    </button>
+                 </div>
+
+                 <div className="text-xs text-gray-500 font-medium">
+                    Filtered Orders: <strong className="text-tea-dark">{filteredOrdersForPayments.length}</strong>
                  </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div onClick={() => setActiveTab('ORDERS')} className="bg-white p-6 rounded-lg shadow border-t-4 border-blue-600 cursor-pointer hover:shadow-lg transition">
-                      <p className="text-gray-500 text-sm font-bold uppercase">Total Captured</p>
-                      <h2 className="text-3xl font-bold text-blue-700 mt-2">₹{totalOnlineRevenue.toLocaleString()}</h2>
-                  </div>
-                  <div className="bg-white p-6 rounded-lg shadow border-t-4 border-yellow-500 cursor-pointer hover:shadow-lg transition">
-                      <p className="text-gray-500 text-sm font-bold uppercase">Pending Settlement</p>
-                      <h2 className="text-3xl font-bold text-gray-800 mt-2">₹{(totalOnlineRevenue * 0.98).toLocaleString()}</h2>
-                  </div>
-                  <div className="bg-white p-6 rounded-lg shadow border-t-4 border-green-600 cursor-pointer hover:shadow-lg transition">
-                      <p className="text-gray-500 text-sm font-bold uppercase">Success Rate</p>
-                      <h2 className="text-3xl font-bold text-green-700 mt-2">98.5%</h2>
-                  </div>
+
+              {/* Payment Type Sub-Navigation */}
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                 <div className="flex items-center gap-2 bg-gray-100 p-1.5 rounded-lg border border-gray-200">
+                    <button
+                       onClick={() => setPaymentSubTab('RAZORPAY')}
+                       className={`px-4 py-2 rounded-md font-bold text-sm transition flex items-center gap-2 ${
+                          paymentSubTab === 'RAZORPAY' ? 'bg-blue-600 text-white shadow' : 'text-gray-600 hover:text-gray-900'
+                       }`}
+                    >
+                       <CreditCard size={18} /> Razorpay (Online)
+                    </button>
+                    <button
+                       onClick={() => setPaymentSubTab('COD')}
+                       className={`px-4 py-2 rounded-md font-bold text-sm transition flex items-center gap-2 ${
+                          paymentSubTab === 'COD' ? 'bg-amber-600 text-white shadow' : 'text-gray-600 hover:text-gray-900'
+                       }`}
+                    >
+                       <DollarSign size={18} /> Cash on Delivery (COD)
+                    </button>
+                 </div>
+
+                 <div className="flex items-center gap-2 flex-wrap">
+                    {paymentSubTab === 'RAZORPAY' && (
+                      <button 
+                         onClick={() => {
+                             if(window.confirm('Are you sure you want to clear all online transaction history? This cannot be undone.')) {
+                                 clearOnlineOrders();
+                             }
+                         }}
+                         className="bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-red-700 transition shadow-sm"
+                      >
+                         <RotateCcw size={14} /> Reset Data
+                      </button>
+                    )}
+
+                    <button 
+                       onClick={() => {
+                           if (paymentSubTab === 'RAZORPAY') {
+                              const data = onlineOrders.map(o => {
+                                  const customer = getOrderCustomerDetails(o, users);
+                                  const itemMrpSum = o.items?.reduce((iSum, i) => iSum + ((i.mrp || 0) * i.quantity), 0) || o.totalAmount;
+                                  const baseMrp = Math.round(itemMrpSum / 1.05);
+                                  const gst = itemMrpSum - baseMrp;
+                                  const fee = Math.round(o.totalAmount * 0.05);
+                                  const totalCap = itemMrpSum + fee;
+                                  const txn = o.transactionId || `pay_${o.id.replace('ORD-', '')}`;
+
+                                  return {
+                                      "Date": o.date,
+                                      "Payment ID": txn,
+                                      "Order ID": o.id,
+                                      "Customer Name": customer.name,
+                                      "Mobile No.": customer.mobile,
+                                      "City": customer.city,
+                                      "Full Address": customer.fullAddress,
+                                      "Payment Method": o.paymentMethod,
+                                      "Base Goods MRP (Excl. GST)": baseMrp,
+                                      "GST (5%)": gst,
+                                      "Total MRP (Incl. 5% GST)": itemMrpSum,
+                                      "Razorpay Gateway Fee (5%)": fee,
+                                      "Total Captured Amount": totalCap,
+                                      "Net Bank Settlement Amount": itemMrpSum,
+                                      "Payment Status": "Captured / Paid"
+                                  };
+                              });
+                              exportToCSV(data, `Razorpay_Payments_${paymentStartDate || 'All'}_to_${paymentEndDate || 'All'}.csv`);
+                           } else {
+                              const data = codOrders.map(o => {
+                                  const customer = getOrderCustomerDetails(o, users);
+                                  const itemMrpSum = o.items?.reduce((iSum, i) => iSum + ((i.mrp || 0) * i.quantity), 0) || o.totalAmount;
+                                  const baseMrp = Math.round(itemMrpSum / 1.05);
+                                  const gst = itemMrpSum - baseMrp;
+                                  const shippingFee = 50;
+                                  const totalCap = itemMrpSum + shippingFee;
+
+                                  return {
+                                      "Date": o.date,
+                                      "Order ID": o.id,
+                                      "Customer Name": customer.name,
+                                      "Mobile No.": customer.mobile,
+                                      "City": customer.city,
+                                      "Full Address": customer.fullAddress,
+                                      "Payment Method": "COD",
+                                      "Base Goods MRP (Excl. GST)": baseMrp,
+                                      "GST (5%)": gst,
+                                      "Total MRP (Incl. 5% GST)": itemMrpSum,
+                                      "Shipping Fee": shippingFee,
+                                      "Total Collectable Amount": totalCap,
+                                      "Order Status": o.status
+                                  };
+                              });
+                              exportToCSV(data, `COD_Payments_${paymentStartDate || 'All'}_to_${paymentEndDate || 'All'}.csv`);
+                           }
+                       }}
+                       className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-green-700 transition shadow-sm"
+                    >
+                       <Download size={14} /> Export Excel
+                    </button>
+
+                    <span className="bg-blue-50 text-blue-800 px-3 py-1 rounded-full text-xs font-extrabold border border-blue-200">
+                       Live Payments
+                    </span>
+                 </div>
               </div>
+
+              {/* RAZORPAY VIEW */}
+              {paymentSubTab === 'RAZORPAY' && (
+                <div className="space-y-6">
+                   <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl flex items-center justify-between">
+                      <div>
+                        <h4 className="font-bold text-blue-900 text-lg flex items-center gap-2">
+                           <CreditCard className="text-blue-600" /> Razorpay Payment Overview (5% Gateway Charges)
+                        </h4>
+                        <p className="text-xs text-blue-700 mt-0.5">
+                           Total Captured includes <strong>Product MRP (with 5% GST) + Razorpay Gateway Charges (5%)</strong>. Pending settlement shows net <strong>Product MRP</strong> transferred to your bank.
+                        </p>
+                      </div>
+                   </div>
+
+                   {/* Razorpay KPI Cards */}
+                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                       <div onClick={() => setActiveTab('ORDERS')} className="bg-white p-5 rounded-xl shadow-sm border border-blue-200 border-t-4 border-t-blue-600 cursor-pointer hover:shadow-md transition">
+                           <span className="text-xs font-bold uppercase text-gray-500 tracking-wider">Total Captured</span>
+                           <h2 className="text-2xl font-black text-blue-700 mt-1">₹{razorpayTotalCaptured.toLocaleString()}</h2>
+                           <p className="text-[11px] text-gray-500 mt-1 font-medium">Product MRP + 5% Razorpay Fees</p>
+                       </div>
+
+                       <div className="bg-white p-5 rounded-xl shadow-sm border border-emerald-200 border-t-4 border-t-emerald-600 hover:shadow-md transition">
+                           <span className="text-xs font-bold uppercase text-gray-500 tracking-wider">Product MRP (Incl. 5% GST)</span>
+                           <h2 className="text-2xl font-black text-emerald-700 mt-1">₹{razorpayMrpTotal.toLocaleString()}</h2>
+                           <p className="text-[11px] text-emerald-800 mt-1 font-semibold">
+                             Base: ₹{razorpayBaseMrpTotal.toLocaleString()} | GST 5%: ₹{razorpayGstTotal.toLocaleString()}
+                           </p>
+                       </div>
+
+                       <div className="bg-white p-5 rounded-xl shadow-sm border border-purple-200 border-t-4 border-t-purple-600 hover:shadow-md transition">
+                           <span className="text-xs font-bold uppercase text-gray-500 tracking-wider">Razorpay Gateway Fee (5%)</span>
+                           <h2 className="text-2xl font-black text-purple-700 mt-1">₹{razorpayFeeTotal.toLocaleString()}</h2>
+                           <p className="text-[11px] text-purple-700 mt-1 font-medium">Flat 5% Gateway Charge</p>
+                       </div>
+
+                       <div className="bg-white p-5 rounded-xl shadow-sm border border-yellow-200 border-t-4 border-t-yellow-500 hover:shadow-md transition">
+                           <span className="text-xs font-bold uppercase text-gray-500 tracking-wider">Net Bank Settlement</span>
+                           <h2 className="text-2xl font-black text-gray-800 mt-1">₹{razorpayPendingSettlement.toLocaleString()}</h2>
+                           <p className="text-[11px] text-emerald-600 mt-1 font-bold">Pure Product MRP Transferred</p>
+                       </div>
+                   </div>
+
+                   {/* Razorpay Online Orders Table */}
+                   <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                      <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+                         <h4 className="font-bold text-gray-800 text-sm">Online Transactions History ({onlineOrders.length})</h4>
+                         <span className="text-xs text-gray-500">Sorted by newest first</span>
+                      </div>
+
+                      {onlineOrders.length === 0 ? (
+                         <div className="p-8 text-center text-gray-500 text-sm">No online Razorpay transactions found in selected date range.</div>
+                      ) : (
+                         <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse text-xs">
+                               <thead>
+                                  <tr className="bg-gray-100 text-gray-600 uppercase font-bold border-b text-[10px]">
+                                     <th className="p-3">Date</th>
+                                     <th className="p-3">Payment ID</th>
+                                     <th className="p-3">Order ID</th>
+                                     <th className="p-3">Customer Name</th>
+                                     <th className="p-3">Mobile No.</th>
+                                     <th className="p-3">City</th>
+                                     <th className="p-3">Base Goods MRP</th>
+                                     <th className="p-3">GST (5%)</th>
+                                     <th className="p-3">Total MRP (Incl. GST)</th>
+                                     <th className="p-3">Razorpay Fee (5%)</th>
+                                     <th className="p-3">Total Captured</th>
+                                     <th className="p-3">Status</th>
+                                  </tr>
+                               </thead>
+                               <tbody className="divide-y divide-gray-200">
+                                  {onlineOrders.map(order => {
+                                     const customer = getOrderCustomerDetails(order, users);
+                                     const itemMrpSum = order.items?.reduce((iSum, i) => iSum + ((i.mrp || 0) * i.quantity), 0) || order.totalAmount;
+                                     const baseMrp = Math.round(itemMrpSum / 1.05);
+                                     const gst = itemMrpSum - baseMrp;
+                                     const fee = Math.round(order.totalAmount * 0.05);
+                                     const totalCap = itemMrpSum + fee;
+                                     const txn = order.transactionId || `pay_${order.id.replace('ORD-', '')}`;
+
+                                     return (
+                                        <tr key={order.id} className="hover:bg-blue-50/50 transition">
+                                           <td className="p-3 font-medium text-gray-700 whitespace-nowrap">{order.date}</td>
+                                           <td className="p-3 font-mono font-bold text-blue-700 whitespace-nowrap">{txn}</td>
+                                           <td className="p-3 font-mono text-gray-600 whitespace-nowrap">{order.id}</td>
+                                           <td className="p-3 font-semibold text-gray-900 whitespace-nowrap">{customer.name}</td>
+                                           <td className="p-3 font-mono text-gray-700 whitespace-nowrap">{customer.mobile}</td>
+                                           <td className="p-3 text-gray-700 whitespace-nowrap">{customer.city}</td>
+                                           <td className="p-3 font-medium text-gray-700 whitespace-nowrap">₹{baseMrp}</td>
+                                           <td className="p-3 font-medium text-amber-700 whitespace-nowrap">₹{gst}</td>
+                                           <td className="p-3 font-bold text-gray-800 whitespace-nowrap">₹{itemMrpSum}</td>
+                                           <td className="p-3 font-medium text-purple-700 whitespace-nowrap">+₹{fee}</td>
+                                           <td className="p-3 font-black text-blue-800 whitespace-nowrap">₹{totalCap}</td>
+                                           <td className="p-3 whitespace-nowrap">
+                                              <span className="bg-green-100 text-green-800 px-2 py-0.5 rounded-full text-[10px] font-extrabold border border-green-200">
+                                                 Captured
+                                              </span>
+                                           </td>
+                                        </tr>
+                                     );
+                                  })}
+                               </tbody>
+                            </table>
+                         </div>
+                      )}
+                   </div>
+                </div>
+              )}
+
+              {/* COD VIEW */}
+              {paymentSubTab === 'COD' && (
+                <div className="space-y-6">
+                   <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center justify-between">
+                      <div>
+                        <h4 className="font-bold text-amber-900 text-lg flex items-center gap-2">
+                           <DollarSign className="text-amber-600" /> Cash on Delivery (COD) Dashboard
+                        </h4>
+                        <p className="text-xs text-amber-800 mt-0.5">
+                           Total Captured includes <strong>Product MRP (with 5% GST) + Shipping Charges (₹50)</strong>.
+                        </p>
+                      </div>
+                   </div>
+
+                   {/* COD KPI Cards */}
+                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                       <div onClick={() => setActiveTab('ORDERS')} className="bg-white p-5 rounded-xl shadow-sm border border-amber-200 border-t-4 border-t-amber-500 cursor-pointer hover:shadow-md transition">
+                           <span className="text-xs font-bold uppercase text-gray-500 tracking-wider">Total Captured</span>
+                           <h2 className="text-2xl font-black text-amber-700 mt-1">₹{codTotalCaptured.toLocaleString()}</h2>
+                           <p className="text-[11px] text-gray-500 mt-1 font-medium">Product MRP + Shipping Cost</p>
+                       </div>
+
+                       <div className="bg-white p-5 rounded-xl shadow-sm border border-emerald-200 border-t-4 border-t-emerald-600 hover:shadow-md transition">
+                           <span className="text-xs font-bold uppercase text-gray-500 tracking-wider">Product MRP (Incl. 5% GST)</span>
+                           <h2 className="text-2xl font-black text-emerald-700 mt-1">₹{codMrpTotal.toLocaleString()}</h2>
+                           <p className="text-[11px] text-emerald-800 mt-1 font-semibold">
+                             Base: ₹{codBaseMrpTotal.toLocaleString()} | GST 5%: ₹{codGstTotal.toLocaleString()}
+                           </p>
+                       </div>
+
+                       <div className="bg-white p-5 rounded-xl shadow-sm border border-blue-200 border-t-4 border-t-blue-600 hover:shadow-md transition">
+                           <span className="text-xs font-bold uppercase text-gray-500 tracking-wider">Shipping & Handling</span>
+                           <h2 className="text-2xl font-black text-blue-700 mt-1">₹{codShippingTotal.toLocaleString()}</h2>
+                           <p className="text-[11px] text-gray-500 mt-1 font-medium">₹50 Flat Charge per Order</p>
+                       </div>
+
+                       <div className="bg-white p-5 rounded-xl shadow-sm border border-purple-200 border-t-4 border-t-purple-600 hover:shadow-md transition">
+                           <span className="text-xs font-bold uppercase text-gray-500 tracking-wider">Pending Collection</span>
+                           <h2 className="text-2xl font-black text-purple-700 mt-1">₹{codPendingMrp.toLocaleString()}</h2>
+                           <p className="text-[11px] text-purple-600 mt-1 font-medium">Active Deliveries MRP</p>
+                       </div>
+                   </div>
+
+                   {/* COD Orders Table */}
+                   <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                      <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+                         <h4 className="font-bold text-gray-800 text-sm">COD Orders List ({codOrders.length})</h4>
+                         <span className="text-xs text-gray-500">Collect on delivery</span>
+                      </div>
+
+                      {codOrders.length === 0 ? (
+                         <div className="p-8 text-center text-gray-500 text-sm">No Cash on Delivery orders found in selected date range.</div>
+                      ) : (
+                         <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse text-xs">
+                               <thead>
+                                  <tr className="bg-gray-100 text-gray-600 uppercase font-bold border-b text-[10px]">
+                                     <th className="p-3">Date</th>
+                                     <th className="p-3">Order ID</th>
+                                     <th className="p-3">Customer Name</th>
+                                     <th className="p-3">Mobile No.</th>
+                                     <th className="p-3">City</th>
+                                     <th className="p-3">Base Goods MRP</th>
+                                     <th className="p-3">GST (5%)</th>
+                                     <th className="p-3">Total MRP (Incl. GST)</th>
+                                     <th className="p-3">Shipping Charge</th>
+                                     <th className="p-3">Total Collectable</th>
+                                     <th className="p-3">Status</th>
+                                  </tr>
+                               </thead>
+                               <tbody className="divide-y divide-gray-200">
+                                  {codOrders.map(order => {
+                                     const customer = getOrderCustomerDetails(order, users);
+                                     const itemMrpSum = order.items?.reduce((iSum, i) => iSum + ((i.mrp || 0) * i.quantity), 0) || order.totalAmount;
+                                     const baseMrp = Math.round(itemMrpSum / 1.05);
+                                     const gst = itemMrpSum - baseMrp;
+                                     const shippingCost = 50;
+                                     const totalCollectable = itemMrpSum + shippingCost;
+
+                                     return (
+                                        <tr key={order.id} className="hover:bg-amber-50/50 transition">
+                                           <td className="p-3 font-medium text-gray-700 whitespace-nowrap">{order.date}</td>
+                                           <td className="p-3 font-mono font-bold text-gray-900 whitespace-nowrap">{order.id}</td>
+                                           <td className="p-3 font-semibold text-gray-900 whitespace-nowrap">{customer.name}</td>
+                                           <td className="p-3 text-gray-700 font-mono whitespace-nowrap">{customer.mobile}</td>
+                                           <td className="p-3 text-gray-700 whitespace-nowrap">{customer.city}</td>
+                                           <td className="p-3 font-medium text-gray-700 whitespace-nowrap">₹{baseMrp}</td>
+                                           <td className="p-3 font-medium text-amber-700 whitespace-nowrap">₹{gst}</td>
+                                           <td className="p-3 font-bold text-emerald-700 whitespace-nowrap">₹{itemMrpSum}</td>
+                                           <td className="p-3 font-medium text-blue-700 whitespace-nowrap">+₹{shippingCost}</td>
+                                           <td className="p-3 font-black text-amber-800 whitespace-nowrap">₹{totalCollectable}</td>
+                                           <td className="p-3 whitespace-nowrap">
+                                              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border uppercase ${
+                                                 order.status === 'Delivered' ? 'bg-green-100 text-green-800 border-green-200' :
+                                                 order.status === 'Cancelled' ? 'bg-red-100 text-red-800 border-red-200' :
+                                                 'bg-amber-100 text-amber-800 border-amber-200'
+                                              }`}>
+                                                 {order.status}
+                                              </span>
+                                           </td>
+                                        </tr>
+                                     );
+                                  })}
+                               </tbody>
+                            </table>
+                         </div>
+                      )}
+                   </div>
+                </div>
+              )}
            </div>
         )}
         
@@ -1005,7 +1577,10 @@ export const Dashboard = () => {
                              <div className="flex flex-col sm:flex-row lg:flex-col lg:items-end justify-between gap-3 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0">
                                <div className="lg:text-right">
                                  <span className="text-2xl font-black text-gray-900">₹{order.totalAmount}</span>
-                                 <span className="text-xs text-gray-500 block">Method: {order.paymentMethod}</span>
+                                 <span className="text-xs font-semibold text-gray-600 block">Method: {order.paymentMethod}</span>
+                                 <span className="text-[11px] font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 mt-1 inline-block">
+                                    Txn/Pay ID: {order.paymentMethod === 'COD' ? 'COD' : (order.transactionId || `pay_${order.id.replace('ORD-', '')}`)}
+                                 </span>
                                </div>
 
                                <div className="flex items-center gap-2 flex-wrap">
@@ -1080,6 +1655,343 @@ export const Dashboard = () => {
                    </div>
                  )}
              </div>
+        )}
+
+         {activeTab === 'PURCHASE' && (
+          <div className="space-y-6 animate-fade-in">
+             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+               <div>
+                 <h2 className="text-2xl font-bold text-tea-dark flex items-center gap-2">
+                   <ClipboardList className="text-tea-green" /> Purchase Orders & Supplier Bills
+                 </h2>
+                 <p className="text-sm text-gray-500 mt-1">Manage tea inventory purchases, supplier details, and uploaded bill documents.</p>
+               </div>
+               <button 
+                 onClick={() => setShowPOForm(true)}
+                 className="bg-tea-dark hover:bg-black text-white px-5 py-2.5 rounded-lg font-bold shadow transition flex items-center gap-2 shrink-0"
+               >
+                 <PlusCircle size={18} /> New Purchase Order
+               </button>
+             </div>
+
+             {/* PO Summary Metrics */}
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+               <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+                 <div>
+                   <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Total Purchase Orders</p>
+                   <p className="text-2xl font-black text-tea-dark mt-1">{purchaseOrders.length}</p>
+                 </div>
+                 <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100">
+                   <ClipboardList className="text-emerald-600" size={24} />
+                 </div>
+               </div>
+
+               <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+                 <div>
+                   <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Pending POs</p>
+                   <p className="text-2xl font-black text-amber-600 mt-1">
+                     {purchaseOrders.filter(p => p.status === 'Pending').length}
+                   </p>
+                 </div>
+                 <div className="bg-amber-50 p-3 rounded-xl border border-amber-100">
+                   <AlertTriangle className="text-amber-600" size={24} />
+                 </div>
+               </div>
+
+               <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+                 <div>
+                   <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Total PO Cost</p>
+                   <p className="text-2xl font-black text-tea-dark mt-1">
+                     ₹{purchaseOrders.reduce((sum, p) => sum + (p.totalAmount || 0), 0).toLocaleString()}
+                   </p>
+                 </div>
+                 <div className="bg-blue-50 p-3 rounded-xl border border-blue-100">
+                   <DollarSign className="text-blue-600" size={24} />
+                 </div>
+               </div>
+             </div>
+
+             {/* PO Filter Bar & Export */}
+             <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-3">
+               <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+                 {/* Search & Date Filters */}
+                 <div className="flex flex-wrap items-center gap-3 flex-1">
+                   {/* Supplier Name Search */}
+                   <div className="relative flex-1 min-w-[200px]">
+                     <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                     <input 
+                       type="text" 
+                       placeholder="Filter by Supplier Name / PO No / Phone..." 
+                       value={poSupplierFilter}
+                       onChange={e => setPoSupplierFilter(e.target.value)}
+                       className="w-full pl-9 pr-8 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-tea-green outline-none"
+                     />
+                     {poSupplierFilter && (
+                       <button onClick={() => setPoSupplierFilter('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                         <X size={14} />
+                       </button>
+                     )}
+                   </div>
+
+                   {/* Status Filter */}
+                   <div className="w-36">
+                     <select 
+                       value={poStatusFilter}
+                       onChange={e => setPoStatusFilter(e.target.value)}
+                       className="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-tea-green outline-none"
+                     >
+                       <option value="ALL">All Status</option>
+                       <option value="Pending">Pending</option>
+                       <option value="Received">Received</option>
+                       <option value="Cancelled">Cancelled</option>
+                     </select>
+                   </div>
+
+                   {/* From Date */}
+                   <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700">
+                     <span className="font-semibold text-gray-500 shrink-0">From:</span>
+                     <input 
+                       type="date" 
+                       value={poFromDate}
+                       onChange={e => setPoFromDate(e.target.value)}
+                       className="bg-transparent text-xs font-medium outline-none cursor-pointer"
+                     />
+                   </div>
+
+                   {/* To Date */}
+                   <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700">
+                     <span className="font-semibold text-gray-500 shrink-0">To:</span>
+                     <input 
+                       type="date" 
+                       value={poToDate}
+                       onChange={e => setPoToDate(e.target.value)}
+                       className="bg-transparent text-xs font-medium outline-none cursor-pointer"
+                     />
+                   </div>
+
+                   {(poSupplierFilter || poStatusFilter !== 'ALL' || poFromDate || poToDate) && (
+                     <button 
+                       onClick={() => {
+                         setPoSupplierFilter('');
+                         setPoStatusFilter('ALL');
+                         setPoFromDate('');
+                         setPoToDate('');
+                       }}
+                       className="text-xs text-red-600 font-bold hover:underline py-1 px-2"
+                     >
+                       Clear Filters
+                     </button>
+                   )}
+                 </div>
+
+                 {/* Buttons */}
+                 <div className="flex items-center gap-2 shrink-0">
+                   <button 
+                     onClick={() => setShowPOForm(true)}
+                     className="bg-tea-dark hover:bg-black text-white px-4 py-2 rounded-lg font-bold text-xs shadow transition flex items-center justify-center gap-1.5 shrink-0"
+                   >
+                     <PlusCircle size={16} /> New Purchase Order
+                   </button>
+
+                   <button 
+                     onClick={exportPOsToCSV}
+                     className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded-lg font-bold text-xs shadow transition flex items-center justify-center gap-1.5 shrink-0"
+                   >
+                     <FileSpreadsheet size={16} /> Export CSV Report
+                   </button>
+                 </div>
+               </div>
+
+               <div className="text-xs text-gray-500 flex flex-wrap justify-between items-center gap-2 pt-2 border-t">
+                 <span>Showing <strong>{filteredPurchaseOrders.length}</strong> of <strong>{purchaseOrders.length}</strong> purchase orders</span>
+                 {filteredPurchaseOrders.length > 0 && (
+                   <span className="font-bold text-tea-dark">Filtered Total Cost: ₹{filteredPurchaseOrders.reduce((sum, p) => sum + (p.totalAmount || 0), 0).toLocaleString()}</span>
+                 )}
+               </div>
+             </div>
+
+             {/* Purchase Orders List */}
+             {purchaseOrders.length === 0 ? (
+               <div className="bg-white rounded-xl p-12 text-center border border-gray-200 shadow-sm">
+                 <ClipboardList size={48} className="mx-auto text-gray-300 mb-3" />
+                 <h3 className="font-bold text-gray-700 text-lg">No Purchase Orders Created Yet</h3>
+                 <p className="text-gray-500 text-sm mt-1 mb-4">Click below to create your first supplier purchase order with supplier contact details and bill upload.</p>
+                 <button 
+                   onClick={() => setShowPOForm(true)}
+                   className="bg-tea-green text-white font-bold px-5 py-2.5 rounded-lg hover:bg-tea-dark transition inline-flex items-center gap-2"
+                 >
+                   <PlusCircle size={18} /> Create First Purchase Order
+                 </button>
+               </div>
+             ) : filteredPurchaseOrders.length === 0 ? (
+               <div className="bg-white rounded-xl p-10 text-center border border-gray-200 shadow-sm">
+                 <Search size={40} className="mx-auto text-gray-300 mb-2" />
+                 <h3 className="font-bold text-gray-700">No Purchase Orders Match Filters</h3>
+                 <p className="text-gray-500 text-xs mt-1 mb-3">Try clearing supplier name or date filters to view all purchase orders.</p>
+                 <button 
+                   onClick={() => {
+                     setPoSupplierFilter('');
+                     setPoStatusFilter('ALL');
+                     setPoFromDate('');
+                     setPoToDate('');
+                   }}
+                   className="text-xs bg-gray-100 hover:bg-gray-200 font-bold px-4 py-2 rounded-lg text-gray-700 transition"
+                 >
+                   Reset Filters
+                 </button>
+               </div>
+             ) : (
+               <div className="space-y-4">
+                 {filteredPurchaseOrders.map((po) => (
+                   <div key={po.id} className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition overflow-hidden">
+                     <div className="p-5">
+                       {/* PO Top Row */}
+                       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-4 border-b">
+                         <div className="flex items-center gap-3">
+                           <span className="font-mono font-bold text-lg text-tea-dark bg-gray-100 px-3 py-1 rounded-lg border">{po.poNumber}</span>
+                           <span className={`px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wide ${
+                             po.status === 'Received' ? 'bg-green-100 text-green-800 border border-green-200' :
+                             po.status === 'Cancelled' ? 'bg-red-100 text-red-800 border border-red-200' :
+                             'bg-amber-100 text-amber-800 border border-amber-200'
+                           }`}>
+                             {po.status}
+                           </span>
+                         </div>
+                         <div className="text-sm text-gray-500">
+                           Created Date: <strong className="text-gray-800">{po.date}</strong>
+                         </div>
+                       </div>
+
+                       {/* PO Body Grid */}
+                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 py-4 border-b">
+                         {/* Supplier Info Box */}
+                         <div className="bg-gray-50 p-3.5 rounded-lg border border-gray-200 space-y-1.5 text-xs">
+                           <p className="font-bold text-gray-900 text-sm flex items-center gap-1.5 border-b pb-1">
+                             <UserIcon size={16} className="text-tea-dark shrink-0" />
+                             {po.supplierName || 'Supplier'}
+                           </p>
+                           {po.supplierMobile && (
+                             <p className="text-gray-700 flex items-center gap-1.5">
+                               <Phone size={13} className="text-gray-400 shrink-0" />
+                               <a href={`tel:${po.supplierMobile}`} className="hover:underline font-medium">{po.supplierMobile}</a>
+                             </p>
+                           )}
+                           {po.supplierEmail && (
+                             <p className="text-gray-700 flex items-center gap-1.5 truncate">
+                               <Mail size={13} className="text-gray-400 shrink-0" />
+                               <a href={`mailto:${po.supplierEmail}`} className="hover:underline font-medium truncate">{po.supplierEmail}</a>
+                             </p>
+                           )}
+                           {po.supplierAddress && (
+                             <p className="text-gray-600 flex items-start gap-1.5">
+                               <MapPin size={13} className="text-gray-400 shrink-0 mt-0.5" />
+                               <span>{po.supplierAddress}</span>
+                             </p>
+                           )}
+                         </div>
+
+                         {/* Items List */}
+                         <div className="lg:col-span-1 space-y-1">
+                           <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Purchased Products</p>
+                           <div className="bg-gray-50 rounded-lg p-2.5 max-h-32 overflow-y-auto divide-y text-xs">
+                             {po.items?.map((item, idx) => (
+                               <div key={idx} className="py-1 flex justify-between items-center">
+                                 <div>
+                                   <span className="font-semibold text-gray-800">{item.productName}</span>
+                                   <span className="text-gray-500 ml-1">x{item.quantity}</span>
+                                 </div>
+                                 <span className="font-bold text-gray-900">₹{item.totalCost?.toLocaleString()}</span>
+                               </div>
+                             ))}
+                           </div>
+                         </div>
+
+                         {/* Supplier Bill Document Box */}
+                         <div className="bg-emerald-50/50 border border-emerald-100 p-3.5 rounded-lg flex flex-col justify-between">
+                           <div>
+                             <p className="text-xs font-bold text-emerald-900 uppercase tracking-wide mb-2 flex items-center gap-1">
+                               <Paperclip size={14} className="text-emerald-700" /> Supplier Bill / Invoice Document
+                             </p>
+                             {po.billUrl ? (
+                               <div className="space-y-2">
+                                 <div className="flex items-center gap-2 text-xs text-emerald-800 bg-white p-2 rounded border border-emerald-200">
+                                   <FileCheck size={18} className="text-green-600 shrink-0" />
+                                   <span className="font-medium truncate">Supplier Bill Attached</span>
+                                 </div>
+                                 <button
+                                   onClick={() => setViewingBillUrl({ url: po.billUrl!, poNumber: po.poNumber, supplierName: po.supplierName })}
+                                   className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-1.5 px-3 rounded text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm"
+                                 >
+                                   <Eye size={14} /> View / Download Bill
+                                 </button>
+                               </div>
+                             ) : (
+                               <div className="text-xs text-gray-500 space-y-2">
+                                 <p className="italic">No bill attached yet.</p>
+                                 <label className="block bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 font-bold py-1.5 px-3 rounded text-center cursor-pointer transition text-xs">
+                                   <span className="flex items-center justify-center gap-1">
+                                     <UploadCloud size={14} /> Upload Bill Document
+                                   </span>
+                                   <input 
+                                     type="file" 
+                                     accept="image/*,.pdf" 
+                                     className="hidden" 
+                                     onChange={(e) => {
+                                       const file = e.target.files?.[0];
+                                       if (file) {
+                                         const reader = new FileReader();
+                                         reader.onloadend = () => {
+                                           updatePurchaseOrderBill(po.id, reader.result as string);
+                                         };
+                                         reader.readAsDataURL(file);
+                                       }
+                                     }} 
+                                   />
+                                 </label>
+                               </div>
+                             )}
+                           </div>
+                           <div className="pt-2 mt-2 border-t border-emerald-200/60 flex justify-between items-center text-xs">
+                             <span className="text-gray-500">Total PO Amount:</span>
+                             <span className="font-black text-base text-tea-dark">₹{po.totalAmount?.toLocaleString()}</span>
+                           </div>
+                         </div>
+                       </div>
+
+                       {/* PO Actions Footer */}
+                       <div className="pt-3 flex flex-wrap justify-between items-center gap-2">
+                         <div className="text-xs text-gray-500">
+                           {po.status === 'Pending' && (
+                             <span className="text-amber-700 font-medium">Clicking 'Mark Received' will auto-add item quantities into Inventory Stock.</span>
+                           )}
+                         </div>
+                         <div className="flex items-center gap-2">
+                           {po.status === 'Pending' && (
+                             <button
+                               onClick={() => receivePurchaseOrder(po.id)}
+                               className="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow transition flex items-center gap-1"
+                             >
+                               <CheckCircle size={14} /> Mark Received (Add Stock)
+                             </button>
+                           )}
+                           <button
+                             onClick={() => {
+                               if (confirm(`Are you sure you want to delete purchase order ${po.poNumber}?`)) {
+                                 deletePurchaseOrder(po.id);
+                               }
+                             }}
+                             className="text-red-600 hover:text-red-800 hover:bg-red-50 p-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1"
+                           >
+                             <Trash2 size={14} /> Delete PO
+                           </button>
+                         </div>
+                       </div>
+                     </div>
+                   </div>
+                 ))}
+               </div>
+             )}
+          </div>
         )}
 
         {activeTab === 'INVENTORY' && (
@@ -1666,6 +2578,63 @@ export const Dashboard = () => {
       {/* Review Modal - ADDED */}
       {reviewProduct && (
         <ReviewModal product={reviewProduct} onClose={() => setReviewProduct(null)} />
+      )}
+
+      {/* Supplier Bill Viewer Modal */}
+      {viewingBillUrl && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-fade-in">
+            <div className="p-4 bg-tea-dark text-white flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-lg flex items-center gap-2">
+                  <FileCheck className="text-tea-gold" size={20} />
+                  Supplier Bill - {viewingBillUrl.poNumber}
+                </h3>
+                <p className="text-xs text-gray-300">Supplier: {viewingBillUrl.supplierName}</p>
+              </div>
+              <button 
+                onClick={() => setViewingBillUrl(null)} 
+                className="text-gray-300 hover:text-white transition"
+              >
+                <XCircle size={24} />
+              </button>
+            </div>
+
+            <div className="p-4 flex-1 overflow-auto bg-gray-100 flex items-center justify-center">
+              {viewingBillUrl.url.startsWith('data:image/') || viewingBillUrl.url.match(/\.(jpeg|jpg|png|gif|webp)$/i) ? (
+                <img 
+                  src={viewingBillUrl.url} 
+                  alt={`Supplier Bill ${viewingBillUrl.poNumber}`} 
+                  className="max-w-full max-h-[70vh] object-contain rounded border shadow-sm"
+                />
+              ) : (
+                <iframe 
+                  src={viewingBillUrl.url} 
+                  title={`Supplier Bill ${viewingBillUrl.poNumber}`}
+                  className="w-full h-[65vh] rounded border"
+                />
+              )}
+            </div>
+
+            <div className="p-4 border-t bg-gray-50 flex justify-between items-center">
+              <a 
+                href={viewingBillUrl.url} 
+                download={`Supplier_Bill_${viewingBillUrl.poNumber}`}
+                target="_blank"
+                rel="noreferrer"
+                className="bg-tea-dark hover:bg-black text-white px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2"
+              >
+                <Download size={14} /> Download Bill Document
+              </a>
+              <button 
+                onClick={() => setViewingBillUrl(null)} 
+                className="px-4 py-2 border border-gray-300 rounded-lg text-xs font-bold text-gray-700 hover:bg-gray-100"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

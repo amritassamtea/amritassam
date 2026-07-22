@@ -62,6 +62,10 @@ export interface PurchaseOrder {
   id: string;
   poNumber: string;
   supplierName: string;
+  supplierAddress?: string;
+  supplierMobile?: string;
+  supplierEmail?: string;
+  billUrl?: string; // Uploaded supplier bill (base64 or URL)
   date: string;
   status: 'Pending' | 'Received' | 'Cancelled';
   items: PurchaseItem[];

@@ -289,6 +289,8 @@ const CartDrawer = ({ isOpen, onClose, onCheckout }: { isOpen: boolean, onClose:
 const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
   const { cart, user, placeOrder, paymentSettings } = useStore();
   const [step, setStep] = useState(1);
+  const [recipientName, setRecipientName] = useState(user?.name || '');
+  const [recipientMobile, setRecipientMobile] = useState(user?.mobile || '');
   const [street, setStreet] = useState(user?.address || '');
   const [city, setCity] = useState('');
   const [stateName, setStateName] = useState('Assam');
@@ -298,7 +300,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
   const [utrNumber, setUtrNumber] = useState('');
   const [upiMethod, setUpiMethod] = useState<'qr' | 'direct'>('qr');
 
-  const address = street ? `${street.trim()}, ${city.trim()}, ${stateName.trim()} - ${zip.trim()}` : '';
+  const address = street ? `Recipient: ${recipientName.trim()} (Ph: ${recipientMobile.trim()}) | ${street.trim()}, ${city.trim()}, ${stateName.trim()} - ${zip.trim()}` : '';
 
   const total = cart.reduce((acc, item) => {
     const price = user?.role === 'DISTRIBUTOR' ? item.distributorPrice : item.mrp;
@@ -306,6 +308,14 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
   }, 0);
 
   const handlePlaceOrder = async () => {
+    if(!recipientName.trim()) {
+      alert("Please enter the recipient's name.");
+      return;
+    }
+    if(!recipientMobile.trim() || recipientMobile.trim().length !== 10) {
+      alert("Please enter a valid 10-digit mobile number for the recipient.");
+      return;
+    }
     if(!street.trim()) {
       alert("Please enter street address / house number.");
       return;
@@ -323,9 +333,11 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
       return;
     }
 
+    const recipientDetails = { name: recipientName.trim(), mobile: recipientMobile.trim() };
+
     if (payment === 'COD') {
       try {
-        await placeOrder(payment, address, 'Pending');
+        await placeOrder(payment, address, 'Pending', undefined, recipientDetails);
         alert(`Order Placed Successfully! Payment to be collected on delivery.`);
         onOrderPlaced();
       } catch (err: any) {
@@ -346,7 +358,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
       }
       try {
         const transId = `Manual UPI - UTR: ${utrNumber.trim()} (Paid from: ${customerUpi.trim()})`;
-        await placeOrder('UPI', address, 'Pending', transId);
+        await placeOrder('UPI', address, 'Pending', transId, recipientDetails);
         alert(`Order Placed Successfully! Your transaction ID is saved. Admin will verify the payment and process your order.`);
         onOrderPlaced();
       } catch (err: any) {
@@ -405,8 +417,8 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
           description: "Fresh Assam Tea Order",
           image: "https://cdn-icons-png.flaticon.com/512/3063/3063822.png",
           prefill: {
-            name: user?.name || "Customer",
-            contact: user?.mobile || "",
+            name: recipientName.trim() || user?.name || "Customer",
+            contact: recipientMobile.trim() || user?.mobile || "",
             email: "customer@amritassam.com"
           },
           theme: {
@@ -435,7 +447,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
                   if (verifyContentType.includes("application/json")) {
                     const verifyData = await verifyRes.json();
                     if (verifyData.status === "success") {
-                      await placeOrder(payment, address, 'Paid', paymentId);
+                      await placeOrder(payment, address, 'Paid', paymentId, recipientDetails);
                       alert(`Payment Successful! Payment ID: ${paymentId}`);
                       onOrderPlaced();
                       return;
@@ -448,7 +460,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
             }
 
             // Direct client payment completion
-            await placeOrder(payment, address, 'Paid', paymentId);
+            await placeOrder(payment, address, 'Paid', paymentId, recipientDetails);
             alert(`Payment Successful! Payment ID: ${paymentId}`);
             onOrderPlaced();
           },
@@ -492,8 +504,38 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
       <div className="bg-white p-6 rounded shadow-lg">
         {step === 1 ? (
           <div>
-            <h3 className="font-bold mb-4 text-tea-dark text-lg border-b pb-2">Shipping Address</h3>
+            <h3 className="font-bold mb-4 text-tea-dark text-lg border-b pb-2">Shipping & Recipient Details</h3>
             <div className="space-y-4 mb-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-tea-green/5 p-3 rounded-lg border border-tea-green/20">
+                <div>
+                  <label className="block text-xs font-bold text-tea-dark mb-1">
+                    Recipient Name (Order Recipient) <span className="text-red-500">*</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    className="w-full border rounded p-3 text-sm focus:ring-2 focus:ring-tea-green bg-white outline-none font-semibold" 
+                    placeholder="Name of person receiving the order"
+                    value={recipientName}
+                    onChange={e => setRecipientName(e.target.value)}
+                  />
+                  <span className="text-[10px] text-gray-500 mt-0.5 block">Can be yourself or someone else</span>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-tea-dark mb-1">
+                    Recipient Mobile No. <span className="text-red-500">*</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    maxLength={10}
+                    className="w-full border rounded p-3 text-sm font-mono focus:ring-2 focus:ring-tea-green bg-white outline-none font-bold" 
+                    placeholder="10-digit delivery contact number"
+                    value={recipientMobile}
+                    onChange={e => setRecipientMobile(e.target.value.replace(/\D/g, ''))}
+                  />
+                  <span className="text-[10px] text-gray-500 mt-0.5 block">Used for delivery updates & calls</span>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-gray-600 mb-1">Street Address / House No. / Landmark</label>
                 <input 
@@ -550,6 +592,14 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
             </div>
              <button 
               onClick={() => {
+                if(!recipientName.trim()) {
+                  alert("Please enter recipient name.");
+                  return;
+                }
+                if(!recipientMobile.trim() || recipientMobile.trim().length !== 10) {
+                  alert("Please enter a valid 10-digit mobile number for the recipient.");
+                  return;
+                }
                 if(!street.trim()) {
                   alert("Please enter street address / house number.");
                   return;

@@ -361,7 +361,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
 
       try {
         let order_id = `mock_order_${Date.now()}`;
-        let useKey = paymentSettings.razorpayKeyId || import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_test_TG5H5KQvhI4q2g";
+        let useKey = paymentSettings.razorpayKeyId || import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_test_TGSeD6kDjDtnoA";
         let is_mock = true;
 
         try {

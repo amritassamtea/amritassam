@@ -22,8 +22,8 @@ app.post("/api/create-order", async (req, res) => {
     return res.status(400).json({ error: "Amount must be at least 100 paise" });
   }
 
-  const keyId = process.env.RAZORPAY_KEY_ID || "rzp_test_TG5H5KQvhI4q2g";
-  const keySecret = process.env.RAZORPAY_KEY_SECRET || "BFvu3Tx4WfSneO8vZnCE5KlP";
+  const keyId = process.env.RAZORPAY_KEY_ID || "rzp_test_TGSeD6kDjDtnoA";
+  const keySecret = process.env.RAZORPAY_KEY_SECRET || "mDRwyfjMwJTmcepn8OfHn260";
 
   if (!keySecret || keySecret.trim() === "") {
     console.warn("Razorpay KEY_SECRET not configured. Using client-side payment mode.");
@@ -82,7 +82,7 @@ app.post("/api/verify-payment", async (req, res) => {
     return res.json({ status: "success", message: "Mock payment verified successfully" });
   }
 
-  const secret = process.env.RAZORPAY_KEY_SECRET || "BFvu3Tx4WfSneO8vZnCE5KlP";
+  const secret = process.env.RAZORPAY_KEY_SECRET || "mDRwyfjMwJTmcepn8OfHn260";
   if (!secret) {
     return res.status(500).json({ error: "Razorpay secret key not configured on backend" });
   }
@@ -107,8 +107,8 @@ app.post("/api/refund-payment", async (req, res) => {
     return res.status(400).json({ error: "Payment ID is required for refund" });
   }
 
-  const keyId = process.env.RAZORPAY_KEY_ID || "rzp_test_TG5H5KQvhI4q2g";
-  const keySecret = process.env.RAZORPAY_KEY_SECRET || "BFvu3Tx4WfSneO8vZnCE5KlP";
+  const keyId = process.env.RAZORPAY_KEY_ID || "rzp_test_TGSeD6kDjDtnoA";
+  const keySecret = process.env.RAZORPAY_KEY_SECRET || "mDRwyfjMwJTmcepn8OfHn260";
 
   if (!keyId || !keySecret || payment_id.startsWith("pay_mock_")) {
     console.warn("Razorpay credentials not found or mock payment ID. Returning simulated refund response.");

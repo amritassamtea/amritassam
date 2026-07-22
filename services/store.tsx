@@ -118,7 +118,7 @@ const DEFAULT_INVOICE_SETTINGS: InvoiceSettings = {
 };
 
 const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
-  razorpayKeyId: 'rzp_test_TG5H5KQvhI4q2g',
+  razorpayKeyId: 'rzp_test_TGSeD6kDjDtnoA',
   merchantUpiId: 'amritassamtea@okaxis'
 };
 
@@ -258,8 +258,8 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
                  footerNote: displayFooter
              });
              let rzpKey = data.razorpay_key_id || DEFAULT_PAYMENT_SETTINGS.razorpayKeyId;
-             if (rzpKey === 'rzp_test_1DP5mmOlF5G5ag' || rzpKey === 'rzp_test_TG637ITm48z8Ra' || rzpKey === 'rzp_test_TB2Phw7nWzv1u8' || rzpKey === 'rzp_test_TG67jxp1pHTgMB' || rzpKey === 'rzp_test_TG8tR9LgCQuTng') {
-                 rzpKey = 'rzp_test_TG5H5KQvhI4q2g';
+             if (rzpKey === 'rzp_test_1DP5mmOlF5G5ag' || rzpKey === 'rzp_test_TG637ITm48z8Ra' || rzpKey === 'rzp_test_TB2Phw7nWzv1u8' || rzpKey === 'rzp_test_TG67jxp1pHTgMB' || rzpKey === 'rzp_test_TG8tR9LgCQuTng' || rzpKey === 'rzp_test_TG5H5KQvhI4q2g') {
+                 rzpKey = 'rzp_test_TGSeD6kDjDtnoA';
                  // Self-heal DB: update stale or default database values asynchronously
                  supabase.from('site_settings').update({ razorpay_key_id: rzpKey }).eq('id', 1).then();
              }

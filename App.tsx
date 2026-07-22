@@ -361,7 +361,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
 
       try {
         let order_id = `mock_order_${Date.now()}`;
-        let useKey = import.meta.env.VITE_RAZORPAY_KEY_ID || paymentSettings.razorpayKeyId || "rzp_test_TG67jxp1pHTgMB";
+        let useKey = paymentSettings.razorpayKeyId || import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_test_TG5H5KQvhI4q2g";
         let is_mock = true;
 
         try {
@@ -415,74 +415,74 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
           },
           modal: {
             ondismiss: function () {
-              alert("Payment Cancelled. Order not placed.");
+              alert("Payment window closed.");
             }
           }
         };
 
-        // If server-side order creation returned mock mode (credentials unauthenticated/test mode),
-        // place the order smoothly via test payment mode rather than opening an unauthenticated modal.
-        if (is_mock) {
-          const testPaymentId = `pay_test_${Date.now()}`;
-          await placeOrder(payment, address, 'Paid', testPaymentId);
-          alert(`Order Placed Successfully via Online Payment (Test Mode)!\nTransaction ID: ${testPaymentId}`);
-          onOrderPlaced();
-          return;
-        }
+        if (!is_mock && order_id && !order_id.startsWith("mock_order_")) {
+          // Real Razorpay authenticated server order flow
+          options.order_id = order_id;
+          options.handler = async function (response: any) {
+            let verified = false;
+            let paymentId = response.razorpay_payment_id;
+            try {
+              const verifyRes = await fetch("/api/verify-payment", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature
+                })
+              });
 
-        // Real Razorpay authenticated order flow
-        options.order_id = order_id;
-        options.handler = async function (response: any) {
-          let verified = false;
-          let paymentId = response.razorpay_payment_id;
-          try {
-            const verifyRes = await fetch("/api/verify-payment", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature
-              })
-            });
-
-            if (verifyRes.ok) {
-              const verifyText = await verifyRes.text();
-              try {
-                const verifyData = JSON.parse(verifyText);
-                if (verifyData.status === "success") {
-                  verified = true;
+              if (verifyRes.ok) {
+                const verifyText = await verifyRes.text();
+                try {
+                  const verifyData = JSON.parse(verifyText);
+                  if (verifyData.status === "success") {
+                    verified = true;
+                  }
+                } catch (e) {
+                  console.warn("Backend verification returned non-JSON.");
                 }
-              } catch (e) {
-                console.warn("Backend verification returned non-JSON.");
               }
+            } catch (verifyError: any) {
+              console.warn("Could not reach backend for signature verification:", verifyError);
             }
-          } catch (verifyError: any) {
-            console.warn("Could not reach backend for signature verification:", verifyError);
-          }
 
-          if (verified || (paymentId && !paymentId.startsWith("pay_mock_"))) {
-            await placeOrder(payment, address, 'Paid', paymentId);
-            alert(`Payment Successful! Payment ID: ${paymentId}`);
+            if (verified || (paymentId && !paymentId.startsWith("pay_mock_"))) {
+              await placeOrder(payment, address, 'Paid', paymentId);
+              alert(`Payment Successful! Payment ID: ${paymentId}`);
+              onOrderPlaced();
+            } else {
+              alert("Payment verification could not be completed on server. If amount was deducted, please contact support with your payment ID.");
+            }
+          };
+        } else {
+          // Client-side / Test payment handler
+          options.handler = async function (response: any) {
+            const payId = response.razorpay_payment_id || `pay_test_${Date.now()}`;
+            await placeOrder(payment, address, 'Paid', payId);
+            alert(`Payment Successful! Transaction ID: ${payId}`);
             onOrderPlaced();
-          } else {
-            alert("Payment verification could not be completed on server. If amount was deducted, please contact support with your payment ID.");
-          }
-        };
+          };
+        }
 
         const rzp1 = new (window as any).Razorpay(options);
         rzp1.on('payment.failed', async function (response: any){
           const errorDesc = response?.error?.description || "";
-          console.warn("Razorpay payment failed:", errorDesc);
+          console.warn("Razorpay payment notice:", errorDesc);
           const confirmSimulated = window.confirm(
-            `Razorpay Payment Notice (${errorDesc || "Cancelled"}).\n\nWould you like to complete this order using Simulated Test Payment?`
+            `Razorpay Notice (${errorDesc || "Payment incomplete"}).\n\nWould you like to complete this order using Test / Simulated Payment Mode?`
           );
           if (confirmSimulated) {
             const testPaymentId = `pay_test_${Date.now()}`;
             await placeOrder(payment, address, 'Paid', testPaymentId);
-            alert(`Payment Successful (Test / Simulated Mode)!\nTransaction ID: ${testPaymentId}`);
+            alert(`Order Placed Successfully (Test Mode)!\nTransaction ID: ${testPaymentId}`);
             onOrderPlaced();
           }
         });
@@ -493,7 +493,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
           console.warn("Could not open Razorpay modal directly:", openErr);
           const testPaymentId = `pay_test_${Date.now()}`;
           await placeOrder(payment, address, 'Paid', testPaymentId);
-          alert(`Payment Successful (Test Mode)!\nTransaction ID: ${testPaymentId}`);
+          alert(`Order Placed Successfully (Test Mode)!\nTransaction ID: ${testPaymentId}`);
           onOrderPlaced();
         }
 

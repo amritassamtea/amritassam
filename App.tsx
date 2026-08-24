@@ -13,6 +13,9 @@ import { Product } from './types';
 const AuthPage = ({ onLoginSuccess }: { onLoginSuccess: () => void }) => {
   const { login, register, users } = useStore();
   const [isRegister, setIsRegister] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotMobile, setForgotMobile] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
   const [formData, setFormData] = useState({ mobile: '', password: '', name: '', territory: '', role: 'CUSTOMER' });
 
   const resetForm = () => {
@@ -118,6 +121,21 @@ const AuthPage = ({ onLoginSuccess }: { onLoginSuccess: () => void }) => {
             value={formData.password}
             onChange={e => setFormData({...formData, password: e.target.value})}
           />
+
+          {!isRegister && (
+            <div className="flex justify-end">
+              <button 
+                type="button"
+                onClick={() => {
+                  setForgotMobile(formData.mobile);
+                  setShowForgot(true);
+                }}
+                className="text-xs text-tea-dark hover:underline font-medium"
+              >
+                Forgot Password?
+              </button>
+            </div>
+          )}
           
           <button type="submit" className="w-full bg-tea-dark text-white font-bold py-3 rounded hover:bg-green-900 transition">
             {isRegister ? 'Register' : 'Login'}
@@ -136,6 +154,60 @@ const AuthPage = ({ onLoginSuccess }: { onLoginSuccess: () => void }) => {
             {isRegister ? "Login" : "Register"}
           </button>
         </p>
+
+        {showForgot && (
+          <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+            <div className="bg-white rounded-lg p-6 max-w-sm w-full shadow-xl">
+              <h3 className="font-bold text-lg text-tea-dark mb-2">Reset Password</h3>
+              <p className="text-xs text-gray-600 mb-4">
+                Enter your registered 10-digit mobile number to request a password reset from Admin.
+              </p>
+              <input 
+                type="tel"
+                maxLength={10}
+                placeholder="Enter 10-digit mobile"
+                value={forgotMobile}
+                onChange={e => setForgotMobile(e.target.value.replace(/\D/g,''))}
+                className="w-full border p-3 rounded text-sm mb-4 outline-none focus:ring-2 focus:ring-tea-green"
+              />
+              <div className="flex justify-end gap-2">
+                <button 
+                  onClick={() => setShowForgot(false)}
+                  className="px-4 py-2 text-gray-500 hover:bg-gray-100 rounded text-sm"
+                >
+                  Cancel
+                </button>
+                <button 
+                  disabled={forgotLoading}
+                  onClick={async () => {
+                    if (!forgotMobile || forgotMobile.length !== 10) {
+                      alert("Please enter a valid 10-digit mobile number");
+                      return;
+                    }
+                    setForgotLoading(true);
+                    try {
+                      const res = await fetch('/api/auth/send-reset-email', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ emailOrMobile: forgotMobile })
+                      });
+                      const data = await res.json();
+                      alert(data.message || "Password reset request submitted. Please contact Administrator or check your registered email.");
+                      setShowForgot(false);
+                    } catch (e: any) {
+                      alert("Could not process request. Please contact Amrit Assam Admin at support@amritassam.com");
+                    } finally {
+                      setForgotLoading(false);
+                    }
+                  }}
+                  className="bg-tea-dark text-white px-4 py-2 rounded text-sm font-bold hover:bg-black"
+                >
+                  {forgotLoading ? 'Submitting...' : 'Request Reset'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -268,10 +340,11 @@ const CartDrawer = ({ isOpen, onClose, onCheckout }: { isOpen: boolean, onClose:
         </div>
 
         <div className="p-4 border-t bg-gray-50">
-          <div className="flex justify-between items-center mb-4">
-            <span className="font-bold text-lg">Total</span>
+          <div className="flex justify-between items-center mb-1">
+            <span className="font-bold text-lg">Total MRP</span>
             <span className="font-bold text-2xl text-tea-dark">₹{total}</span>
           </div>
+          <p className="text-xs text-gray-500 mb-4">* All product prices are inclusive of 5% GST</p>
           <button 
             disabled={cart.length === 0}
             onClick={() => { onClose(); onCheckout(); }}
@@ -373,9 +446,9 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
 
       try {
         let order_id: string | null = null;
-        let useKey = paymentSettings.razorpayKeyId || import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_test_TGSnHi9bfhqqFK";
-        if (useKey === "rzp_test_TGSXaCkUr8lyVc" || useKey === "rzp_test_TGSeD6kDjDtnoA") {
-          useKey = "rzp_test_TGSnHi9bfhqqFK";
+        let useKey = paymentSettings.razorpayKeyId || import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_live_TNAiAT6hLmRWuI";
+        if (useKey === "rzp_test_TGSXaCkUr8lyVc" || useKey === "rzp_test_TGSeD6kDjDtnoA" || useKey === "rzp_test_TGSnHi9bfhqqFK" || useKey === "rzp_test_TNAR6TMBbK2pv3") {
+          useKey = "rzp_live_TNAiAT6hLmRWuI";
         }
 
         // Step 1: Attempt to create Order on Backend API
@@ -751,6 +824,9 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
                  <span>Total Payable</span>
                  <span>₹{total}</span>
                </div>
+               <p className="text-xs text-gray-500 mt-1">
+                 (MRP Inclusive of 5% GST — Taxable: ₹{(total / 1.05).toFixed(2)} | GST: ₹{(total - (total / 1.05)).toFixed(2)})
+               </p>
                {payment !== 'COD' && payment !== 'MANUAL_UPI' && (
                  <div className="text-xs text-gray-500 mt-2">
                    * Secure payment via Razorpay

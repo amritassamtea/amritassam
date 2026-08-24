@@ -121,14 +121,14 @@ const InvoiceTemplate = ({ order, onClose }: { order: Order; onClose: () => void
           </div>
 
           {/* Table */}
-          <table className="w-full mb-8">
+          <table className="w-full mb-8 text-sm">
             <thead>
               <tr className="bg-gray-100 border-b-2 border-black">
-                <th className="text-left p-2">Item</th>
+                <th className="text-left p-2">Item Details</th>
                 <th className="text-center p-2">HSN</th>
                 <th className="text-center p-2">Qty</th>
-                <th className="text-right p-2">Price</th>
-                <th className="text-right p-2">Total</th>
+                <th className="text-right p-2">MRP / Rate (₹)<br/><span className="text-[10px] font-normal text-gray-500">(Incl. 5% GST)</span></th>
+                <th className="text-right p-2">Amount (₹)</th>
               </tr>
             </thead>
             <tbody>
@@ -140,34 +140,45 @@ const InvoiceTemplate = ({ order, onClose }: { order: Order; onClose: () => void
                       <div className="font-bold">{item.name}</div>
                       <div className="text-xs text-gray-500">{item.weight}</div>
                     </td>
-                    <td className="text-center p-2">0902</td>
-                    <td className="text-center p-2">{item.quantity}</td>
+                    <td className="text-center p-2 font-mono">0902</td>
+                    <td className="text-center p-2 font-medium">{item.quantity}</td>
                     <td className="text-right p-2">₹{price}</td>
-                    <td className="text-right p-2">₹{price * item.quantity}</td>
+                    <td className="text-right p-2 font-medium">₹{(price * item.quantity).toLocaleString()}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
 
-          {/* Totals */}
-          <div className="flex justify-end">
-            <div className="w-1/2">
-              <div className="flex justify-between py-1 border-b">
-                <span>Subtotal:</span>
-                <span>₹{(order.totalAmount - order.taxAmount).toFixed(2)}</span>
+          {/* Totals & Tax Breakdown (GST Included in MRP) */}
+          <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-4">
+            <div className="text-xs text-gray-500 max-w-xs border rounded p-3 bg-gray-50">
+              <p className="font-bold text-gray-700 mb-1">Tax Summary (HSN 0902 - Tea):</p>
+              <p>• CGST @ 2.5%: ₹{((order.totalAmount - (order.totalAmount / 1.05)) / 2).toFixed(2)}</p>
+              <p>• SGST @ 2.5%: ₹{((order.totalAmount - (order.totalAmount / 1.05)) / 2).toFixed(2)}</p>
+              <p className="mt-1 text-[11px] text-gray-600 italic">* All item prices are inclusive of 5% Goods and Services Tax (GST).</p>
+            </div>
+            
+            <div className="w-full sm:w-1/2">
+              <div className="flex justify-between py-1.5 border-b text-sm">
+                <span className="text-gray-600">Taxable Value (Excl. GST):</span>
+                <span className="font-medium">₹{(order.totalAmount / 1.05).toFixed(2)}</span>
               </div>
-              <div className="flex justify-between py-1 border-b">
-                <span>CGST (2.5%):</span>
-                <span>₹{(order.taxAmount / 2).toFixed(2)}</span>
+              <div className="flex justify-between py-1.5 border-b text-sm">
+                <span className="text-gray-600">CGST (2.5%):</span>
+                <span>₹{((order.totalAmount - (order.totalAmount / 1.05)) / 2).toFixed(2)}</span>
               </div>
-              <div className="flex justify-between py-1 border-b">
-                <span>SGST (2.5%):</span>
-                <span>₹{(order.taxAmount / 2).toFixed(2)}</span>
+              <div className="flex justify-between py-1.5 border-b text-sm">
+                <span className="text-gray-600">SGST (2.5%):</span>
+                <span>₹{((order.totalAmount - (order.totalAmount / 1.05)) / 2).toFixed(2)}</span>
               </div>
-              <div className="flex justify-between py-2 border-b-2 border-black font-bold text-xl mt-2">
-                <span>Grand Total:</span>
-                <span>₹{order.totalAmount}</span>
+              <div className="flex justify-between py-1.5 border-b text-sm text-tea-dark font-medium bg-tea-light/10 px-2 rounded">
+                <span>Total GST Amount (5% Included):</span>
+                <span>₹{(order.totalAmount - (order.totalAmount / 1.05)).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between py-2 border-b-2 border-black font-bold text-lg mt-2 text-tea-dark">
+                <span>Grand Total (MRP Incl. GST):</span>
+                <span>₹{order.totalAmount.toLocaleString()}</span>
               </div>
             </div>
           </div>
@@ -231,33 +242,134 @@ const AddUserForm = ({ onClose, onSubmit }: { onClose: () => void, onSubmit: (us
   );
 };
 
-const ChangePasswordModal = ({ targetUser, onClose, onUpdate }: { targetUser: {id: string, name: string}, onClose: () => void, onUpdate: (id: string, pass: string) => void }) => {
+const ChangePasswordModal = ({ 
+    targetUser, 
+    onClose, 
+    onSuccess 
+}: { 
+    targetUser: {id: string, name: string}, 
+    onClose: () => void, 
+    onSuccess: (msg: string) => void 
+}) => {
+    const { updateUserPassword } = useStore();
     const [pass, setPass] = useState('');
+    const [serviceKey, setServiceKey] = useState(() => localStorage.getItem('amrit_assam_supabase_service_key') || '');
+    const [showKeyInput, setShowKeyInput] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [errorMsg, setErrorMsg] = useState('');
+
+    const handleUpdate = async () => {
+        if (!pass.trim()) {
+            setErrorMsg("Password cannot be empty");
+            return;
+        }
+        if (pass.trim().length < 6) {
+            setErrorMsg("Password should be at least 6 characters long.");
+            return;
+        }
+
+        setErrorMsg('');
+        setLoading(true);
+
+        try {
+            if (serviceKey.trim()) {
+                localStorage.setItem('amrit_assam_supabase_service_key', serviceKey.trim());
+            }
+
+            const result = await updateUserPassword(targetUser.id, pass.trim(), serviceKey.trim());
+            if (result.success) {
+                onSuccess(result.message || `Password for ${targetUser.name} updated successfully!`);
+                onClose();
+            } else {
+                setErrorMsg(result.message);
+                if (result.requiresKey) {
+                    setShowKeyInput(true);
+                }
+            }
+        } catch (err: any) {
+            setErrorMsg(err.message || "Failed to update password");
+        } finally {
+            setLoading(false);
+        }
+    };
+
     return (
         <div className="fixed inset-0 z-[110] bg-black/60 flex items-center justify-center p-4">
-            <div className="bg-white p-6 rounded-lg w-full max-w-sm animate-fade-in">
-                <h3 className="font-bold text-lg mb-4 text-tea-dark">Change Password for {targetUser.name}</h3>
-                <input 
-                    type="text"
-                    className="w-full border p-3 rounded mb-4 outline-none focus:ring-2 focus:ring-tea-green"
-                    placeholder="Enter new password"
-                    value={pass}
-                    onChange={e => setPass(e.target.value)}
-                />
-                <div className="flex justify-end gap-2">
-                    <button onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">Cancel</button>
-                    <button onClick={() => {
-                        if(pass) {
-                            onUpdate(targetUser.id, pass);
-                        } else {
-                            alert("Password cannot be empty");
-                        }
-                    }} className="bg-tea-dark text-white px-4 py-2 rounded font-bold hover:bg-black">Update</button>
+            <div className="bg-white p-6 rounded-lg w-full max-w-md shadow-2xl animate-fade-in">
+                <div className="flex justify-between items-center mb-4 border-b pb-2">
+                    <h3 className="font-bold text-lg text-tea-dark flex items-center gap-2">
+                        <Lock size={18} /> Reset Password
+                    </h3>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600">✕</button>
+                </div>
+
+                <p className="text-sm text-gray-600 mb-3">
+                    Setting new login password for: <span className="font-bold text-gray-900">{targetUser.name}</span>
+                </p>
+
+                {errorMsg && (
+                    <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded leading-relaxed">
+                        {errorMsg}
+                    </div>
+                )}
+
+                <div className="space-y-4 mb-5">
+                    <div>
+                        <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                            New Password
+                        </label>
+                        <input 
+                            type="text"
+                            className="w-full border p-3 rounded text-sm outline-none focus:ring-2 focus:ring-tea-green font-mono"
+                            placeholder="Enter at least 6 characters"
+                            value={pass}
+                            disabled={loading}
+                            onChange={e => setPass(e.target.value)}
+                        />
+                    </div>
+
+                    {(showKeyInput || !localStorage.getItem('amrit_assam_supabase_service_key')) && (
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded text-xs space-y-2">
+                            <div className="flex items-center justify-between">
+                                <label className="font-bold text-amber-900">
+                                    Supabase Service Role Key (Admin Reset)
+                                </label>
+                            </div>
+                            <input 
+                                type="password"
+                                className="w-full border border-amber-300 p-2 rounded text-xs font-mono bg-white"
+                                placeholder="Paste service_role secret key from Supabase Dashboard"
+                                value={serviceKey}
+                                disabled={loading}
+                                onChange={e => setServiceKey(e.target.value)}
+                            />
+                            <p className="text-[11px] text-amber-800 leading-tight">
+                                Required by Supabase to update another user's authentication credentials. Found in Supabase &gt; Project Settings &gt; API &gt; service_role (secret).
+                            </p>
+                        </div>
+                    )}
+                </div>
+
+                <div className="flex justify-end gap-2 border-t pt-4">
+                    <button 
+                        onClick={onClose} 
+                        disabled={loading}
+                        className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm font-medium"
+                    >
+                        Cancel
+                    </button>
+                    <button 
+                        onClick={handleUpdate}
+                        disabled={loading}
+                        className="bg-tea-dark text-white px-5 py-2 rounded text-sm font-bold hover:bg-black flex items-center gap-2 disabled:opacity-50"
+                    >
+                        {loading ? 'Updating...' : 'Set Password'}
+                    </button>
                 </div>
             </div>
         </div>
-    )
-}
+    );
+};
 
 const ReviewManagerForm = ({ products, review, onClose, onSubmit }: { products: Product[], review?: Review | null, onClose: () => void, onSubmit: (r: Review) => void }) => {
     const [formData, setFormData] = useState<Partial<Review>>({
@@ -433,7 +545,8 @@ const ManualOrderForm = ({ products, users, onClose, onSubmit }: { products: Pro
     if (!user || cart.length === 0) return;
 
     const total = calculateTotal();
-    const tax = total * 0.05;
+    const taxableBase = total / 1.05;
+    const tax = total - taxableBase;
 
     const order: Order = {
       id: `ORD-${Date.now()}`,
@@ -442,8 +555,8 @@ const ManualOrderForm = ({ products, users, onClose, onSubmit }: { products: Pro
       userMobile: user.mobile,
       userAddress: user.address || 'Counter Sale',
       items: cart.map(c => ({...c.product, quantity: c.quantity})),
-      totalAmount: Math.round(total + tax),
-      taxAmount: Math.round(tax),
+      totalAmount: Math.round(total),
+      taxAmount: Math.round(tax * 100) / 100,
       status: 'Delivered',
       paymentMethod: 'Cash',
       paymentStatus: 'Paid',
@@ -500,7 +613,9 @@ const ManualOrderForm = ({ products, users, onClose, onSubmit }: { products: Pro
                  })}
                </tbody>
              </table>
-             <div className="text-right font-bold text-lg mt-2">Total: ₹{Math.round(calculateTotal() * 1.05)}</div>
+             <div className="text-right font-bold text-base mt-2 text-tea-dark">
+               Total (MRP Incl. 5% GST): ₹{calculateTotal().toLocaleString()}
+             </div>
           </div>
 
           <button onClick={handleSubmit} className="w-full bg-green-600 text-white font-bold py-3 rounded hover:bg-green-700">
@@ -799,6 +914,7 @@ export const Dashboard = () => {
   const [settingsForm, setSettingsForm] = useState<InvoiceSettings>(invoiceSettings);
   const [paymentForm, setPaymentForm] = useState<PaymentSettings>(paymentSettings);
   const [brandForm, setBrandForm] = useState<BrandAssets>(brandAssets);
+  const [supabaseServiceKeyInput, setSupabaseServiceKeyInput] = useState(() => localStorage.getItem('amrit_assam_supabase_service_key') || '');
 
   React.useEffect(() => {
     setSettingsForm(invoiceSettings);
@@ -2327,12 +2443,37 @@ export const Dashboard = () => {
                     </div>
                 </div>
 
+                {/* DATABASE & AUTH MANAGEMENT SETTINGS */}
+                <div className="mt-8 border-t pt-6">
+                   <h4 className="font-bold text-lg mb-4 flex items-center gap-2 text-gray-600 border-b pb-2">
+                     <Lock size={20} /> Supabase Auth & Password Management
+                   </h4>
+                   <div>
+                     <label className="block text-sm font-bold text-gray-600 mb-1">Supabase Service Role Key (Admin Secret)</label>
+                     <input 
+                       type="password"
+                       className="w-full border p-3 rounded font-mono text-sm bg-gray-50" 
+                       value={supabaseServiceKeyInput}
+                       onChange={e => setSupabaseServiceKeyInput(e.target.value)}
+                       placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                     />
+                     <p className="text-xs text-gray-500 mt-1">
+                       Allows Administrator to directly reset/update any user's password. Found in Supabase &gt; Project Settings &gt; API &gt; <code>service_role</code> (secret).
+                     </p>
+                   </div>
+                </div>
+
                 <div className="pt-4 flex justify-end">
                    <button 
                     onClick={() => {
                        updateInvoiceSettings(settingsForm);
                        updatePaymentSettings(paymentForm);
                        updateBrandAssets(brandForm);
+                       if (supabaseServiceKeyInput.trim()) {
+                         localStorage.setItem('amrit_assam_supabase_service_key', supabaseServiceKeyInput.trim());
+                       } else {
+                         localStorage.removeItem('amrit_assam_supabase_service_key');
+                       }
                        alert("Settings saved successfully!");
                     }}
                     className="bg-tea-green text-white font-bold py-3 px-8 rounded hover:bg-tea-dark flex items-center gap-2"
@@ -2403,9 +2544,8 @@ export const Dashboard = () => {
             <ChangePasswordModal 
                 targetUser={passwordModalUser} 
                 onClose={() => setPasswordModalUser(null)} 
-                onUpdate={(id, pass) => {
-                    updateUserPassword(id, pass);
-                    alert(`Password for ${passwordModalUser.name} updated successfully`);
+                onSuccess={(msg) => {
+                    alert(msg);
                     setPasswordModalUser(null);
                 }} 
             />
@@ -2562,9 +2702,8 @@ export const Dashboard = () => {
             <ChangePasswordModal 
                 targetUser={passwordModalUser} 
                 onClose={() => setPasswordModalUser(null)} 
-                onUpdate={(id, pass) => {
-                    updateUserPassword(id, pass);
-                    alert(`Password updated successfully`);
+                onSuccess={(msg) => {
+                    alert(msg);
                     setPasswordModalUser(null);
                 }} 
             />

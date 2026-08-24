@@ -43,7 +43,7 @@ interface StoreContextType {
   deleteReview: (reviewId: string) => Promise<void>;
   addFakeReview: (review: Review) => Promise<void>;
   clearOnlineOrders: () => void;
-  updateUserPassword: (userId: string, newPassword: string) => Promise<void>;
+  updateUserPassword: (userId: string, newPassword: string, customServiceKey?: string) => Promise<{ success: boolean; message: string; requiresKey?: boolean }>;
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
@@ -121,7 +121,7 @@ const DEFAULT_INVOICE_SETTINGS: InvoiceSettings = {
 };
 
 const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
-  razorpayKeyId: 'rzp_test_TGSnHi9bfhqqFK',
+  razorpayKeyId: 'rzp_live_TNAiAT6hLmRWuI',
   merchantUpiId: 'amritassamtea@okaxis'
 };
 
@@ -350,8 +350,8 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
                  footerNote: displayFooter
              });
              let rzpKey = data.razorpay_key_id || DEFAULT_PAYMENT_SETTINGS.razorpayKeyId;
-             if (rzpKey === 'rzp_test_1DP5mmOlF5G5ag' || rzpKey === 'rzp_test_TG637ITm48z8Ra' || rzpKey === 'rzp_test_TB2Phw7nWzv1u8' || rzpKey === 'rzp_test_TG67jxp1pHTgMB' || rzpKey === 'rzp_test_TG8tR9LgCQuTng' || rzpKey === 'rzp_test_TG5H5KQvhI4q2g' || rzpKey === 'rzp_test_TGSeD6kDjDtnoA') {
-                 rzpKey = 'rzp_test_TGSnHi9bfhqqFK';
+             if (rzpKey === 'rzp_test_1DP5mmOlF5G5ag' || rzpKey === 'rzp_test_TG637ITm48z8Ra' || rzpKey === 'rzp_test_TB2Phw7nWzv1u8' || rzpKey === 'rzp_test_TG67jxp1pHTgMB' || rzpKey === 'rzp_test_TG8tR9LgCQuTng' || rzpKey === 'rzp_test_TG5H5KQvhI4q2g' || rzpKey === 'rzp_test_TGSeD6kDjDtnoA' || rzpKey === 'rzp_test_TGSnHi9bfhqqFK' || rzpKey === 'rzp_test_TGSXaCkUr8lyVc' || rzpKey === 'rzp_test_TNAR6TMBbK2pv3') {
+                 rzpKey = 'rzp_live_TNAiAT6hLmRWuI';
                  // Self-heal DB: update stale or default database values asynchronously
                  supabase.from('site_settings').update({ razorpay_key_id: rzpKey }).eq('id', 1).then();
              }
@@ -631,21 +631,21 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
       }
     }
     
-    const subTotal = cart.reduce((sum, item) => {
+    // Product MRP is inclusive of 5% GST (HSN 0902: 2.5% CGST + 2.5% SGST)
+    const totalAmount = cart.reduce((sum, item) => {
       const price = user.role === 'DISTRIBUTOR' ? item.distributorPrice : item.mrp;
       return sum + (price * item.quantity);
     }, 0);
     
-    const taxRate = 0.05; 
-    const taxAmount = subTotal * taxRate;
-    const totalAmount = subTotal + taxAmount;
+    const taxableBase = totalAmount / 1.05;
+    const taxAmount = totalAmount - taxableBase;
 
     const { data: orderData, error: orderError } = await supabase
         .from('orders')
         .insert({
             user_id: user.id,
-            total_amount: totalAmount,
-            tax_amount: taxAmount,
+            total_amount: Math.round(totalAmount),
+            tax_amount: Math.round(taxAmount * 100) / 100,
             status: 'Processing',
             payment_method: paymentMethod,
             payment_status: paymentStatus,
@@ -1009,13 +1009,49 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
     setOrders(prevOrders => prevOrders.filter(o => o.paymentMethod === 'COD'));
   };
 
-  const updateUserPassword = async (userId: string, newPassword: string) => {
+  const updateUserPassword = async (
+    userId: string, 
+    newPassword: string, 
+    customServiceKey?: string
+  ): Promise<{ success: boolean; message: string; requiresKey?: boolean }> => {
+      // 1. If updating currently logged in user's own password
       if (user && user.id === userId) {
           const { error } = await supabase.auth.updateUser({ password: newPassword });
-          if(error) alert(error.message);
-          else alert("Password updated");
-      } else {
-          alert("Cannot update other user's password via Client API. Requires Admin Edge Function.");
+          if (error) {
+              return { success: false, message: error.message };
+          }
+          return { success: true, message: "Your password has been updated successfully." };
+      }
+
+      // 2. If Admin updating another user, call backend server API (with service role key)
+      try {
+          const savedKey = customServiceKey || localStorage.getItem('amrit_assam_supabase_service_key') || '';
+          const res = await fetch('/api/admin/update-user-password', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                userId, 
+                newPassword, 
+                serviceRoleKey: savedKey 
+              })
+          });
+
+          const data = await res.json();
+          if (res.ok && data.status === 'success') {
+              return { success: true, message: data.message || "User password updated successfully." };
+          } else {
+              return { 
+                  success: false, 
+                  message: data.error || "Failed to update user password.",
+                  requiresKey: !!data.requiresKey
+              };
+          }
+      } catch (err: any) {
+          console.error("updateUserPassword error:", err);
+          return { 
+            success: false, 
+            message: err.message || "Failed to communicate with server to update password." 
+          };
       }
   };
 

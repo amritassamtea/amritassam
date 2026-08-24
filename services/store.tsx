@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User, Product, CartItem, Order, Role, InvoiceSettings, PurchaseOrder, PaymentSettings, Review, BrandAssets } from '../types';
+import { User, Product, CartItem, Order, Role, InvoiceSettings, PurchaseOrder, PaymentSettings, Review, BrandAssets, Coupon } from '../types';
 import { PRODUCTS, MOCK_USERS } from '../constants';
 import { supabase } from './supabase';
 
@@ -11,6 +11,7 @@ interface StoreContextType {
   cart: CartItem[];
   users: User[]; 
   reviews: Review[];
+  coupons: Coupon[];
   invoiceSettings: InvoiceSettings;
   paymentSettings: PaymentSettings;
   brandAssets: BrandAssets;
@@ -21,7 +22,7 @@ interface StoreContextType {
   addToCart: (product: Product, quantity: number) => void;
   removeFromCart: (productId: string) => void;
   clearCart: () => void;
-  placeOrder: (paymentMethod: 'UPI' | 'Card' | 'COD', address: string, paymentStatus?: 'Pending' | 'Paid', transactionId?: string) => Promise<void>;
+  placeOrder: (paymentMethod: 'UPI' | 'Card' | 'COD' | 'Cash' | 'MANUAL_UPI', address: string, paymentStatus?: 'Pending' | 'Paid', transactionId?: string, recipientDetails?: { name?: string; mobile?: string }, couponInfo?: { code: string; discountAmount: number }) => Promise<void>;
   deleteOrder: (orderId: string) => Promise<void>;
   addOrder: (order: Order) => Promise<void>; 
   addPurchaseOrder: (po: PurchaseOrder) => Promise<void>;
@@ -42,6 +43,12 @@ interface StoreContextType {
   updateReview: (review: Review) => Promise<void>;
   deleteReview: (reviewId: string) => Promise<void>;
   addFakeReview: (review: Review) => Promise<void>;
+  fetchCoupons: () => Promise<void>;
+  addCoupon: (coupon: Omit<Coupon, 'id'>) => Promise<{ success: boolean; message: string }>;
+  updateCoupon: (coupon: Coupon) => Promise<{ success: boolean; message: string }>;
+  toggleCouponStatus: (couponId: string, isActive: boolean) => Promise<void>;
+  deleteCoupon: (couponId: string) => Promise<void>;
+  validateCoupon: (code: string, cartTotal: number) => { valid: boolean; message: string; discountPercent?: number; discountAmount?: number; coupon?: Coupon };
   clearOnlineOrders: () => void;
   updateUserPassword: (userId: string, newPassword: string, customServiceKey?: string) => Promise<{ success: boolean; message: string; requiresKey?: boolean }>;
 }
@@ -76,37 +83,118 @@ const mapUserFromDB = (u: any): User => ({
   gstNumber: u.gst_number
 });
 
-const mapOrderFromDB = (o: any, items: any[]): Order => ({
-  id: o.id,
-  userId: o.user_id,
-  userName: o.profiles?.name || 'Unknown', // Join with profiles
-  userMobile: o.profiles?.mobile || o.profiles?.phone || '',
-  userAddress: o.shipping_address || o.profiles?.address || '',
-  userGst: o.profiles?.gst_number || '',
-  items: items.map(i => ({
-    id: i.products?.id,
-    name: i.products?.name,
-    image: i.products?.image_url,
-    weight: i.products?.weight,
-    mrp: i.products?.mrp,
-    distributorPrice: i.products?.distributor_price,
-    costPrice: i.products?.cost_price,
-    category: i.products?.category,
-    lowStockThreshold: i.products?.low_stock_threshold,
-    description: i.products?.description,
-    stock: i.products?.stock,
-    quantity: i.quantity
-  })),
-  totalAmount: o.total_amount,
-  taxAmount: o.tax_amount,
-  status: o.status,
-  paymentMethod: o.payment_method,
-  paymentStatus: o.payment_status,
-  transactionId: o.transaction_id,
-  date: new Date(o.created_at).toISOString().split('T')[0],
-  type: o.order_type,
-  invoiceNumber: o.invoice_number
+const mapOrderFromDB = (o: any, items: any[] = [], availableProducts: Product[] = [], availableUsers: User[] = []): Order => {
+  // Extract recipient details from shipping_address if present
+  let resolvedName = o.profiles?.name;
+  let resolvedMobile = o.profiles?.mobile || o.profiles?.phone;
+  let resolvedAddress = o.shipping_address || o.profiles?.address || '';
+
+  if (o.shipping_address && typeof o.shipping_address === 'string') {
+    const match = o.shipping_address.match(/Recipient:\s*([^(|]+)(?:\(Ph:\s*([^)]+)\))?/i);
+    if (match) {
+      if (!resolvedName || resolvedName === 'Unknown') {
+        resolvedName = match[1].trim();
+      }
+      if (!resolvedMobile && match[2]) {
+        resolvedMobile = match[2].trim();
+      }
+    }
+  }
+
+  // Fallback to finding user in users list
+  if (!resolvedName || resolvedName === 'Unknown') {
+    const matchedUser = availableUsers.find(u => u.id === o.user_id);
+    if (matchedUser) {
+      resolvedName = matchedUser.name;
+      if (!resolvedMobile) resolvedMobile = matchedUser.mobile;
+      if (!resolvedAddress) resolvedAddress = matchedUser.address || '';
+    }
+  }
+
+  const mappedItems: CartItem[] = (items || []).map(i => {
+    const matchingProd = availableProducts.find(p => p.id === (i.product_id || i.products?.id));
+    return {
+      id: i.products?.id || i.product_id || matchingProd?.id || `item-${Math.random()}`,
+      name: i.products?.name || matchingProd?.name || 'Assam Gold Tea',
+      image: i.products?.image_url || matchingProd?.image || '',
+      weight: i.products?.weight || matchingProd?.weight || '250g',
+      mrp: Number(i.products?.mrp || matchingProd?.mrp || i.price_per_unit || 0),
+      distributorPrice: Number(i.products?.distributor_price || matchingProd?.distributorPrice || i.price_per_unit || 0),
+      costPrice: Number(i.products?.cost_price || matchingProd?.costPrice || 0),
+      category: i.products?.category || matchingProd?.category || 'Pouch',
+      lowStockThreshold: Number(i.products?.low_stock_threshold || matchingProd?.lowStockThreshold || 10),
+      description: i.products?.description || matchingProd?.description || '',
+      stock: Number(i.products?.stock || matchingProd?.stock || 0),
+      quantity: Number(i.quantity || 1)
+    };
+  });
+
+  return {
+    id: o.id,
+    userId: o.user_id,
+    userName: resolvedName || 'Customer',
+    userMobile: resolvedMobile || '',
+    userAddress: resolvedAddress,
+    userGst: o.profiles?.gst_number || '',
+    items: mappedItems,
+    totalAmount: Number(o.total_amount || 0),
+    taxAmount: Number(o.tax_amount || 0),
+    status: o.status || 'Processing',
+    paymentMethod: o.payment_method || 'UPI',
+    paymentStatus: o.payment_status || 'Paid',
+    transactionId: o.transaction_id || undefined,
+    date: o.created_at ? new Date(o.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+    type: o.order_type || 'RETAIL',
+    invoiceNumber: o.invoice_number || `INV-${o.id.toString().slice(-6)}`,
+    couponCode: o.coupon_code || undefined,
+    discountAmount: o.discount_amount ? Number(o.discount_amount) : undefined
+  };
+};
+
+const mapCouponFromDB = (c: any): Coupon => ({
+  id: c.id ? c.id.toString() : `coup-${Date.now()}`,
+  code: (c.code || '').toUpperCase().trim(),
+  discountPercent: Number(c.discount_percent !== undefined ? c.discount_percent : (c.discountPercent || 0)),
+  minOrderAmount: Number(c.min_order_amount !== undefined ? c.min_order_amount : (c.minOrderAmount || 0)),
+  maxDiscountAmount: (c.max_discount_amount !== null && c.max_discount_amount !== undefined) ? Number(c.max_discount_amount) : (c.maxDiscountAmount ? Number(c.maxDiscountAmount) : undefined),
+  isActive: c.is_active !== undefined ? Boolean(c.is_active) : (c.isActive !== undefined ? Boolean(c.isActive) : true),
+  expiryDate: c.expiry_date || c.expiryDate || undefined,
+  description: c.description || '',
+  createdAt: c.created_at || c.createdAt || new Date().toISOString()
 });
+
+const DEFAULT_COUPONS: Coupon[] = [
+  {
+    id: 'coup-1',
+    code: 'AMRIT10',
+    discountPercent: 10,
+    minOrderAmount: 0,
+    maxDiscountAmount: 500,
+    isActive: true,
+    description: 'Get 10% instant discount on your order',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'coup-2',
+    code: 'WELCOME15',
+    discountPercent: 15,
+    minOrderAmount: 500,
+    maxDiscountAmount: 1000,
+    isActive: true,
+    description: 'Special 15% discount on orders above ₹500',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'coup-3',
+    code: 'SUPERTEA20',
+    discountPercent: 20,
+    minOrderAmount: 1000,
+    maxDiscountAmount: 2000,
+    isActive: true,
+    description: 'Flat 20% discount on orders above ₹1,000',
+    createdAt: new Date().toISOString()
+  }
+];
 
 // --- DEFAULTS ---
 
@@ -151,10 +239,25 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
     }
   });
   const [products, setProducts] = useState<Product[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<Order[]>(() => {
+    try {
+      const cached = localStorage.getItem('amrit_assam_orders_cache');
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [users, setUsers] = useState<User[]>([]); // Admin view of all users
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [coupons, setCoupons] = useState<Coupon[]>(() => {
+    try {
+      const cached = localStorage.getItem('amrit_assam_coupons');
+      return cached ? JSON.parse(cached) : DEFAULT_COUPONS;
+    } catch {
+      return DEFAULT_COUPONS;
+    }
+  });
   
   // Settings State
   const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettings>(DEFAULT_INVOICE_SETTINGS);
@@ -195,6 +298,7 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
 
   const fetchOrders = async () => {
     try {
+      // 1. Try Joined Query with profiles and order_items
       const { data: ordersData, error } = await supabase
         .from('orders')
         .select(`
@@ -202,36 +306,134 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
             profiles (name, mobile, address, gst_number),
             order_items (
                 quantity,
+                price_per_unit,
+                product_id,
                 products (*)
             )
         `)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.warn("Joined orders query failed, falling back to simple query:", error);
-        const { data: simpleOrders } = await supabase
-          .from('orders')
-          .select(`
-              *,
-              order_items (
-                  quantity,
-                  products (*)
-              )
-          `)
-          .order('created_at', { ascending: false });
-
-        if (simpleOrders) {
-          setOrders(simpleOrders.map(o => mapOrderFromDB(o, o.order_items)));
-        }
+      if (!error && ordersData && ordersData.length > 0) {
+        const mappedOrders = ordersData.map(o => mapOrderFromDB(o, o.order_items, products, users));
+        setOrders(prev => {
+          const ids = new Set(mappedOrders.map(m => m.id));
+          const recents = prev.filter(p => !ids.has(p.id));
+          const merged = [...recents, ...mappedOrders];
+          try {
+            localStorage.setItem('amrit_assam_orders_cache', JSON.stringify(merged.slice(0, 100)));
+          } catch (e) {}
+          return merged;
+        });
         return;
       }
 
-      if (ordersData) {
-        const mappedOrders = ordersData.map(o => mapOrderFromDB(o, o.order_items));
-        setOrders(mappedOrders);
+      // 2. Fallback: Query orders and items separately to bypass join restrictions
+      const { data: simpleOrders, error: simpleError } = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (simpleOrders && simpleOrders.length > 0) {
+        const orderIds = simpleOrders.map(o => o.id);
+        const { data: allItems } = await supabase
+          .from('order_items')
+          .select('*, products(*)')
+          .in('order_id', orderIds);
+
+        const itemsByOrder: Record<string, any[]> = {};
+        (allItems || []).forEach(item => {
+          if (!itemsByOrder[item.order_id]) itemsByOrder[item.order_id] = [];
+          itemsByOrder[item.order_id].push(item);
+        });
+
+        const mapped = simpleOrders.map(o => mapOrderFromDB(o, itemsByOrder[o.id] || [], products, users));
+        setOrders(prev => {
+          const ids = new Set(mapped.map(m => m.id));
+          const recents = prev.filter(p => !ids.has(p.id));
+          const merged = [...recents, ...mapped];
+          try {
+            localStorage.setItem('amrit_assam_orders_cache', JSON.stringify(merged.slice(0, 100)));
+          } catch (e) {}
+          return merged;
+        });
+        return;
+      }
+
+      // 3. Fallback to cached orders from localStorage if DB query returned empty
+      const cached = localStorage.getItem('amrit_assam_orders_cache');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setOrders(parsed);
+          }
+        } catch (e) {}
       }
     } catch (err) {
       console.error("fetchOrders error:", err);
+      const cached = localStorage.getItem('amrit_assam_orders_cache');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) setOrders(parsed);
+        } catch (e) {}
+      }
+    }
+  };
+
+  const fetchCoupons = async () => {
+    try {
+      // 1. Try Supabase query
+      const { data, error } = await supabase
+        .from('coupons')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && data && data.length > 0) {
+        const mapped = data.map(mapCouponFromDB);
+        setCoupons(mapped);
+        try {
+          localStorage.setItem('amrit_assam_coupons', JSON.stringify(mapped));
+        } catch (e) {}
+        return;
+      }
+
+      // If table exists but empty, seed default coupons
+      if (!error && data && data.length === 0) {
+        for (const c of DEFAULT_COUPONS) {
+          try {
+            await supabase.from('coupons').insert({
+              code: c.code,
+              discount_percent: c.discountPercent,
+              min_order_amount: c.minOrderAmount || 0,
+              max_discount_amount: c.maxDiscountAmount || null,
+              is_active: c.isActive,
+              description: c.description
+            });
+          } catch (e) {}
+        }
+        setCoupons(DEFAULT_COUPONS);
+        try {
+          localStorage.setItem('amrit_assam_coupons', JSON.stringify(DEFAULT_COUPONS));
+        } catch (e) {}
+        return;
+      }
+
+      // 2. Try Server API
+      const res = await fetch('/api/coupons');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === 'success' && Array.isArray(json.coupons) && json.coupons.length > 0) {
+          const mapped = json.coupons.map(mapCouponFromDB);
+          setCoupons(mapped);
+          try {
+            localStorage.setItem('amrit_assam_coupons', JSON.stringify(mapped));
+          } catch (e) {}
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("fetchCoupons note:", err);
     }
   };
 
@@ -389,8 +591,10 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
   useEffect(() => {
     fetchProducts();
     fetchReviews();
+    fetchCoupons(); // Load active coupons from DB / API
     fetchSettings(); // Load Settings from DB
     fetchPurchaseOrders(); // Sync purchase orders from DB
+    fetchOrders(); // Eagerly load orders
 
     // Eagerly fetch relevant data if user is cached in local storage
     try {
@@ -400,6 +604,7 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
         if (parsed) {
           fetchOrders();
           fetchPurchaseOrders();
+          fetchCoupons();
           if (parsed.role === 'ADMIN') {
             fetchUsers();
           }
@@ -615,11 +820,12 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
   const clearCart = () => setCart([]);
 
   const placeOrder = async (
-    paymentMethod: 'UPI' | 'Card' | 'COD', 
+    paymentMethod: 'UPI' | 'Card' | 'COD' | 'Cash' | 'MANUAL_UPI', 
     address: string, 
     paymentStatus: 'Pending' | 'Paid' = 'Pending', 
     transactionId?: string,
-    recipientDetails?: { name?: string; mobile?: string }
+    recipientDetails?: { name?: string; mobile?: string },
+    couponInfo?: { code: string; discountAmount: number }
   ) => {
     if (!user) return;
 
@@ -631,82 +837,259 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
       }
     }
     
-    // Product MRP is inclusive of 5% GST (HSN 0902: 2.5% CGST + 2.5% SGST)
-    const totalAmount = cart.reduce((sum, item) => {
+    // Product MRP / Wholesale subtotal
+    const subtotal = cart.reduce((sum, item) => {
       const price = user.role === 'DISTRIBUTOR' ? item.distributorPrice : item.mrp;
       return sum + (price * item.quantity);
     }, 0);
-    
-    const taxableBase = totalAmount / 1.05;
-    const taxAmount = totalAmount - taxableBase;
 
-    const { data: orderData, error: orderError } = await supabase
+    const discountAmount = couponInfo?.discountAmount ? Math.min(couponInfo.discountAmount, subtotal) : 0;
+    const finalTotalAmount = Math.max(0, subtotal - discountAmount);
+    
+    // Product MRP is inclusive of 5% GST (HSN 0902: 2.5% CGST + 2.5% SGST)
+    const taxableBase = finalTotalAmount / 1.05;
+    const taxAmount = finalTotalAmount - taxableBase;
+
+    const invoiceNum = `INV-${Date.now().toString().slice(-6)}`;
+    const finalName = recipientDetails?.name ? `${recipientDetails.name} (by ${user.name})` : user.name;
+    const finalMobile = recipientDetails?.mobile || user.mobile;
+    const finalAddress = address || user.address || '';
+
+    let createdOrderId = `ORD-${Date.now()}`;
+
+    // Step 1: Insert into Supabase Orders table
+    try {
+      const { data: orderData, error: orderError } = await supabase
         .from('orders')
         .insert({
             user_id: user.id,
-            total_amount: Math.round(totalAmount),
+            total_amount: Math.round(finalTotalAmount),
             tax_amount: Math.round(taxAmount * 100) / 100,
             status: 'Processing',
             payment_method: paymentMethod,
             payment_status: paymentStatus,
             transaction_id: transactionId || null,
-            invoice_number: `INV-${Date.now().toString().slice(-6)}`,
+            invoice_number: invoiceNum,
             order_type: user.role === 'DISTRIBUTOR' ? 'WHOLESALE' : 'RETAIL',
-            shipping_address: address
+            shipping_address: finalAddress
         })
         .select()
         .single();
 
-    if (orderError || !orderData) {
-        alert("Failed to place order: " + orderError?.message);
-        return;
+      if (orderData?.id) {
+        createdOrderId = orderData.id;
+
+        const orderItems = cart.map(item => ({
+            order_id: orderData.id,
+            product_id: item.id,
+            quantity: item.quantity,
+            price_per_unit: user.role === 'DISTRIBUTOR' ? item.distributorPrice : item.mrp,
+            total_price: (user.role === 'DISTRIBUTOR' ? item.distributorPrice : item.mrp) * item.quantity
+        }));
+
+        await supabase.from('order_items').insert(orderItems);
+      } else if (orderError) {
+        console.warn("Supabase orders insert notice:", orderError);
+      }
+    } catch (dbErr) {
+      console.warn("DB orders insert exception (fallback to local order):", dbErr);
     }
 
-    const orderItems = cart.map(item => ({
-        order_id: orderData.id,
-        product_id: item.id,
-        quantity: item.quantity,
-        price_per_unit: user.role === 'DISTRIBUTOR' ? item.distributorPrice : item.mrp,
-        total_price: (user.role === 'DISTRIBUTOR' ? item.distributorPrice : item.mrp) * item.quantity
-    }));
-
-    await supabase.from('order_items').insert(orderItems);
-
+    // Step 2: Update stock in Supabase
     for (const item of cart) {
          const currentProduct = products.find(p => p.id === item.id);
          if (currentProduct) {
-             const newStock = currentProduct.stock - item.quantity;
-             await supabase.from('products').update({ stock: newStock }).eq('id', item.id);
+             const newStock = Math.max(0, currentProduct.stock - item.quantity);
+             supabase.from('products').update({ stock: newStock }).eq('id', item.id).then();
          }
     }
 
-    const finalName = recipientDetails?.name ? `${recipientDetails.name} (by ${user.name})` : user.name;
-    const finalMobile = recipientDetails?.mobile || user.mobile;
-
+    // Step 3: Create Full in-memory and cached Order Object
     const newOrderObj: Order = {
-      id: orderData.id,
+      id: createdOrderId,
       userId: user.id,
       userName: finalName,
       userMobile: finalMobile,
-      userAddress: address || user.address || '',
+      userAddress: finalAddress,
       userGst: user.gstNumber || '',
       items: cart.map(item => ({ ...item })),
-      totalAmount: Math.round(totalAmount),
-      taxAmount: Math.round(taxAmount),
+      totalAmount: Math.round(finalTotalAmount),
+      taxAmount: Math.round(taxAmount * 100) / 100,
       status: 'Processing',
       paymentMethod: paymentMethod,
       paymentStatus: paymentStatus,
       transactionId: transactionId || undefined,
       date: new Date().toISOString().split('T')[0],
       type: user.role === 'DISTRIBUTOR' ? 'WHOLESALE' : 'RETAIL',
-      invoiceNumber: orderData.invoice_number
+      invoiceNumber: invoiceNum,
+      couponCode: couponInfo?.code,
+      discountAmount: discountAmount > 0 ? discountAmount : undefined
     };
 
-    setOrders(prev => [newOrderObj, ...prev.filter(o => o.id !== newOrderObj.id)]);
+    // Save in state & local backup cache immediately
+    setOrders(prev => {
+      const updated = [newOrderObj, ...prev.filter(o => o.id !== newOrderObj.id)];
+      try {
+        localStorage.setItem('amrit_assam_orders_cache', JSON.stringify(updated.slice(0, 100)));
+      } catch (e) {}
+      return updated;
+    });
 
+    clearCart();
     fetchOrders();
     fetchProducts();
-    clearCart();
+  };
+
+  const addCoupon = async (coupon: Omit<Coupon, 'id'>): Promise<{ success: boolean; message: string }> => {
+    const cleanCode = coupon.code.trim().toUpperCase();
+    if (!cleanCode) {
+      return { success: false, message: "Coupon code is required." };
+    }
+    if (coupons.some(c => c.code.toUpperCase() === cleanCode)) {
+      return { success: false, message: `Coupon with code "${cleanCode}" already exists.` };
+    }
+
+    const newCoupon: Coupon = {
+      id: `coup-${Date.now()}`,
+      code: cleanCode,
+      discountPercent: Number(coupon.discountPercent),
+      minOrderAmount: Number(coupon.minOrderAmount || 0),
+      maxDiscountAmount: coupon.maxDiscountAmount ? Number(coupon.maxDiscountAmount) : undefined,
+      isActive: coupon.isActive !== undefined ? coupon.isActive : true,
+      expiryDate: coupon.expiryDate,
+      description: coupon.description,
+      createdAt: new Date().toISOString()
+    };
+
+    // Attempt Supabase insert
+    try {
+      const { data, error } = await supabase.from('coupons').insert({
+        code: newCoupon.code,
+        discount_percent: newCoupon.discountPercent,
+        min_order_amount: newCoupon.minOrderAmount || 0,
+        max_discount_amount: newCoupon.maxDiscountAmount || null,
+        is_active: newCoupon.isActive,
+        expiry_date: newCoupon.expiryDate || null,
+        description: newCoupon.description || null
+      }).select().single();
+
+      if (data?.id) {
+        newCoupon.id = data.id.toString();
+      }
+    } catch (dbErr) {
+      console.warn("DB insert coupon exception, saved locally:", dbErr);
+    }
+
+    setCoupons(prev => {
+      const updated = [newCoupon, ...prev.filter(c => c.code !== newCoupon.code)];
+      try {
+        localStorage.setItem('amrit_assam_coupons', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
+    return { success: true, message: `Coupon "${cleanCode}" created successfully!` };
+  };
+
+  const updateCoupon = async (updatedCoupon: Coupon): Promise<{ success: boolean; message: string }> => {
+    const cleanCode = updatedCoupon.code.trim().toUpperCase();
+    
+    // Attempt Supabase update
+    try {
+      await supabase.from('coupons').update({
+        code: cleanCode,
+        discount_percent: Number(updatedCoupon.discountPercent),
+        min_order_amount: Number(updatedCoupon.minOrderAmount || 0),
+        max_discount_amount: updatedCoupon.maxDiscountAmount ? Number(updatedCoupon.maxDiscountAmount) : null,
+        is_active: updatedCoupon.isActive,
+        expiry_date: updatedCoupon.expiryDate || null,
+        description: updatedCoupon.description || null
+      }).eq('id', updatedCoupon.id);
+    } catch (dbErr) {
+      console.warn("DB update coupon exception, updated locally:", dbErr);
+    }
+
+    setCoupons(prev => {
+      const updated = prev.map(c => c.id === updatedCoupon.id ? { ...updatedCoupon, code: cleanCode } : c);
+      try {
+        localStorage.setItem('amrit_assam_coupons', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
+    return { success: true, message: `Coupon "${cleanCode}" updated successfully!` };
+  };
+
+  const toggleCouponStatus = async (couponId: string, isActive: boolean) => {
+    try {
+      await supabase.from('coupons').update({ is_active: isActive }).eq('id', couponId);
+    } catch (dbErr) {
+      console.warn("DB toggle coupon exception:", dbErr);
+    }
+
+    setCoupons(prev => {
+      const updated = prev.map(c => c.id === couponId ? { ...c, isActive } : c);
+      try {
+        localStorage.setItem('amrit_assam_coupons', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  };
+
+  const deleteCoupon = async (couponId: string) => {
+    try {
+      await supabase.from('coupons').delete().eq('id', couponId);
+    } catch (dbErr) {
+      console.warn("DB delete coupon exception:", dbErr);
+    }
+
+    setCoupons(prev => {
+      const updated = prev.filter(c => c.id !== couponId);
+      try {
+        localStorage.setItem('amrit_assam_coupons', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  };
+
+  const validateCoupon = (code: string, cartTotal: number) => {
+    const cleanCode = code.trim().toUpperCase();
+    if (!cleanCode) {
+      return { valid: false, message: 'Please enter a coupon code' };
+    }
+    const coupon = coupons.find(c => c.code.toUpperCase() === cleanCode);
+    if (!coupon) {
+      return { valid: false, message: `Coupon code "${cleanCode}" is invalid.` };
+    }
+    if (!coupon.isActive) {
+      return { valid: false, message: `Coupon "${cleanCode}" is currently disabled.` };
+    }
+    if (coupon.expiryDate) {
+      const exp = new Date(coupon.expiryDate).getTime();
+      const today = new Date().setHours(0, 0, 0, 0);
+      if (exp < today) {
+        return { valid: false, message: `Coupon "${cleanCode}" has expired on ${coupon.expiryDate}.` };
+      }
+    }
+    if (coupon.minOrderAmount && cartTotal < coupon.minOrderAmount) {
+      return { 
+        valid: false, 
+        message: `Coupon "${cleanCode}" requires a minimum order of ₹${coupon.minOrderAmount}.` 
+      };
+    }
+
+    let discount = Math.round((cartTotal * coupon.discountPercent) / 100);
+    if (coupon.maxDiscountAmount && discount > coupon.maxDiscountAmount) {
+      discount = coupon.maxDiscountAmount;
+    }
+
+    return {
+      valid: true,
+      message: `Coupon "${coupon.code}" applied! ${coupon.discountPercent}% discount (₹${discount} saved)`,
+      discountPercent: coupon.discountPercent,
+      discountAmount: discount,
+      coupon
+    };
   };
 
   const deleteOrder = async (orderId: string) => {
@@ -1057,12 +1440,12 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
 
   return (
     <StoreContext.Provider value={{
-      user, products, orders, purchaseOrders, cart, users, reviews, invoiceSettings, paymentSettings, brandAssets,
+      user, products, orders, purchaseOrders, cart, users, reviews, coupons, invoiceSettings, paymentSettings, brandAssets,
       login, logout, register, addUser, addToCart, removeFromCart, clearCart,
       placeOrder, deleteOrder, addOrder, addPurchaseOrder, deletePurchaseOrder, receivePurchaseOrder, updatePurchaseOrderBill,
       updateOrderStatus, updatePaymentStatus, approveDistributor, 
       updateProduct, deleteProduct, addProduct, updateStock, updateInvoiceSettings, updatePaymentSettings, updateBrandAssets,
-      addReview, updateReview, deleteReview, addFakeReview, clearOnlineOrders, updateUserPassword
+      addReview, updateReview, deleteReview, addFakeReview, fetchCoupons, addCoupon, updateCoupon, toggleCouponStatus, deleteCoupon, validateCoupon, clearOnlineOrders, updateUserPassword
     }}>
       {children}
     </StoreContext.Provider>

@@ -188,6 +188,87 @@ app.post("/api/auth/send-reset-email", async (req, res) => {
   }
 });
 
+// --- COUPON MANAGEMENT API ROUTES ---
+
+// 6. Get All Coupons
+app.get("/api/coupons", async (req, res) => {
+  try {
+    const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const { data, error } = await supabaseClient
+      .from("coupons")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      return res.json({ status: "fallback", coupons: [] });
+    }
+    return res.json({ status: "success", coupons: data || [] });
+  } catch (err: any) {
+    return res.json({ status: "fallback", coupons: [] });
+  }
+});
+
+// 7. Create or Update Coupon
+app.post("/api/coupons", async (req, res) => {
+  const { id, code, discountPercent, minOrderAmount, maxDiscountAmount, isActive, expiryDate, description, serviceRoleKey } = req.body;
+  
+  if (!code || discountPercent === undefined || discountPercent === null) {
+    return res.status(400).json({ error: "Coupon code and discount percent are required." });
+  }
+
+  const activeServiceKey = (serviceRoleKey || process.env.SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY).trim();
+  const supabaseClient = createClient(SUPABASE_URL, activeServiceKey);
+
+  const payload: any = {
+    code: code.trim().toUpperCase(),
+    discount_percent: Number(discountPercent),
+    min_order_amount: Number(minOrderAmount || 0),
+    max_discount_amount: maxDiscountAmount ? Number(maxDiscountAmount) : null,
+    is_active: isActive !== undefined ? Boolean(isActive) : true,
+    expiry_date: expiryDate || null,
+    description: description || ""
+  };
+
+  if (id && !id.startsWith("coup-temp")) {
+    payload.id = id;
+  }
+
+  try {
+    const { data, error } = await supabaseClient
+      .from("coupons")
+      .upsert(payload)
+      .select()
+      .single();
+
+    if (error) {
+      console.warn("Supabase coupon upsert warning:", error);
+      return res.status(400).json({ error: error.message });
+    }
+
+    return res.json({ status: "success", coupon: data });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || "Failed to save coupon" });
+  }
+});
+
+// 8. Delete Coupon
+app.delete("/api/coupons/:id", async (req, res) => {
+  const { id } = req.params;
+  const activeServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY).trim();
+  const supabaseClient = createClient(SUPABASE_URL, activeServiceKey);
+
+  try {
+    const { error } = await supabaseClient.from("coupons").delete().eq("id", id);
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.json({ status: "success", message: "Coupon deleted successfully" });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || "Failed to delete coupon" });
+  }
+});
+
+
 // --- VITE DEV / PRODUCTION HANDLERS ---
 
 async function startServer() {

@@ -48,6 +48,8 @@ export interface Order {
   date: string;
   type: 'RETAIL' | 'WHOLESALE';
   invoiceNumber?: string;
+  couponCode?: string;
+  discountAmount?: number;
 }
 
 export interface PurchaseItem {
@@ -107,4 +109,16 @@ export interface Review {
   rating: number; // 1 to 5
   comment: string;
   date: string;
+}
+
+export interface Coupon {
+  id: string;
+  code: string;
+  discountPercent: number; // e.g. 10 for 10%
+  minOrderAmount?: number; // Minimum purchase required
+  maxDiscountAmount?: number; // Maximum discount cap in INR
+  isActive: boolean;
+  expiryDate?: string;
+  description?: string;
+  createdAt?: string;
 }

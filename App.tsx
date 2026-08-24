@@ -4,7 +4,7 @@ import { Header, Footer, WhatsAppFloat } from './components/Layout';
 import { Home } from './pages/Home';
 import { Dashboard } from './pages/Dashboard';
 import { ReviewModal } from './components/ReviewModal';
-import { ShoppingCart, Trash2, MessageSquare, Star } from 'lucide-react';
+import { ShoppingCart, Trash2, MessageSquare, Star, Tag, Percent, CheckCircle, X, Sparkles } from 'lucide-react';
 import { Product } from './types';
 
 // --- SUB-PAGES (Inline to fit file structure) ---
@@ -360,7 +360,7 @@ const CartDrawer = ({ isOpen, onClose, onCheckout }: { isOpen: boolean, onClose:
 
 // 4. CHECKOUT PAGE
 const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
-  const { cart, user, placeOrder, paymentSettings } = useStore();
+  const { cart, user, placeOrder, paymentSettings, coupons, validateCoupon } = useStore();
   const [step, setStep] = useState(1);
   const [recipientName, setRecipientName] = useState(user?.name || '');
   const [recipientMobile, setRecipientMobile] = useState(user?.mobile || '');
@@ -373,12 +373,50 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
   const [utrNumber, setUtrNumber] = useState('');
   const [upiMethod, setUpiMethod] = useState<'qr' | 'direct'>('qr');
 
+  // Coupon state
+  const [couponCodeInput, setCouponCodeInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<{ code: string; discountPercent: number; discountAmount: number } | null>(null);
+  const [couponMessage, setCouponMessage] = useState<{ text: string; isError: boolean } | null>(null);
+
   const address = street ? `Recipient: ${recipientName.trim()} (Ph: ${recipientMobile.trim()}) | ${street.trim()}, ${city.trim()}, ${stateName.trim()} - ${zip.trim()}` : '';
 
-  const total = cart.reduce((acc, item) => {
+  const subtotal = cart.reduce((acc, item) => {
     const price = user?.role === 'DISTRIBUTOR' ? item.distributorPrice : item.mrp;
     return acc + (price * item.quantity);
   }, 0);
+
+  const discountAmount = appliedCoupon ? Math.min(appliedCoupon.discountAmount, subtotal) : 0;
+  const total = Math.max(0, subtotal - discountAmount);
+
+  const handleApplyCoupon = (codeToApply?: string) => {
+    const code = (codeToApply || couponCodeInput).trim().toUpperCase();
+    if (!code) {
+      setCouponMessage({ text: "Please enter a promo / coupon code.", isError: true });
+      return;
+    }
+
+    const result = validateCoupon(code, subtotal);
+    if (!result.valid) {
+      setCouponMessage({ text: result.message, isError: true });
+      setAppliedCoupon(null);
+    } else {
+      setAppliedCoupon({
+        code: result.coupon?.code || code,
+        discountPercent: result.discountPercent || 0,
+        discountAmount: result.discountAmount || 0
+      });
+      setCouponMessage({ text: result.message, isError: false });
+      setCouponCodeInput(code);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponMessage(null);
+    setCouponCodeInput('');
+  };
+
+  const activeCoupons = coupons.filter(c => c.isActive);
 
   const handlePlaceOrder = async () => {
     if(!recipientName.trim()) {
@@ -407,10 +445,11 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
     }
 
     const recipientDetails = { name: recipientName.trim(), mobile: recipientMobile.trim() };
+    const couponInfo = appliedCoupon ? { code: appliedCoupon.code, discountAmount } : undefined;
 
     if (payment === 'COD') {
       try {
-        await placeOrder(payment, address, 'Pending', undefined, recipientDetails);
+        await placeOrder(payment, address, 'Pending', undefined, recipientDetails, couponInfo);
         alert(`Order Placed Successfully! Payment to be collected on delivery.`);
         onOrderPlaced();
       } catch (err: any) {
@@ -431,7 +470,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
       }
       try {
         const transId = `Manual UPI - UTR: ${utrNumber.trim()} (Paid from: ${customerUpi.trim()})`;
-        await placeOrder('UPI', address, 'Pending', transId, recipientDetails);
+        await placeOrder('UPI', address, 'Pending', transId, recipientDetails, couponInfo);
         alert(`Order Placed Successfully! Your transaction ID is saved. Admin will verify the payment and process your order.`);
         onOrderPlaced();
       } catch (err: any) {
@@ -487,7 +526,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
           amount: Math.round(total * 100),
           currency: "INR",
           name: "Amrit Assam Tea",
-          description: "Fresh Assam Tea Order",
+          description: appliedCoupon ? `Fresh Assam Tea Order (Coupon: ${appliedCoupon.code})` : "Fresh Assam Tea Order",
           image: "https://cdn-icons-png.flaticon.com/512/3063/3063822.png",
           prefill: {
             name: recipientName.trim() || user?.name || "Customer",
@@ -520,7 +559,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
                   if (verifyContentType.includes("application/json")) {
                     const verifyData = await verifyRes.json();
                     if (verifyData.status === "success") {
-                      await placeOrder(payment, address, 'Paid', paymentId, recipientDetails);
+                      await placeOrder(payment, address, 'Paid', paymentId, recipientDetails, couponInfo);
                       alert(`Payment Successful! Payment ID: ${paymentId}`);
                       onOrderPlaced();
                       return;
@@ -533,7 +572,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
             }
 
             // Direct client payment completion
-            await placeOrder(payment, address, 'Paid', paymentId, recipientDetails);
+            await placeOrder(payment, address, 'Paid', paymentId, recipientDetails, couponInfo);
             alert(`Payment Successful! Payment ID: ${paymentId}`);
             onOrderPlaced();
           },
@@ -570,11 +609,11 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
       <h1 className="text-2xl font-bold mb-6">Checkout</h1>
       
       <div className="flex gap-4 mb-8">
-        <div className={`flex-1 p-4 border-b-4 ${step === 1 ? 'border-tea-green text-tea-dark' : 'border-gray-200 text-gray-400'}`}>1. Address</div>
-        <div className={`flex-1 p-4 border-b-4 ${step === 2 ? 'border-tea-green text-tea-dark' : 'border-gray-200 text-gray-400'}`}>2. Payment</div>
+        <div className={`flex-1 p-4 border-b-4 ${step === 1 ? 'border-tea-green text-tea-dark font-bold' : 'border-gray-200 text-gray-400'}`}>1. Delivery Address</div>
+        <div className={`flex-1 p-4 border-b-4 ${step === 2 ? 'border-tea-green text-tea-dark font-bold' : 'border-gray-200 text-gray-400'}`}>2. Coupon & Payment</div>
       </div>
 
-      <div className="bg-white p-6 rounded shadow-lg">
+      <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
         {step === 1 ? (
           <div>
             <h3 className="font-bold mb-4 text-tea-dark text-lg border-b pb-2">Shipping & Recipient Details</h3>
@@ -693,12 +732,85 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
               }}
               className="w-full bg-tea-dark text-white font-bold py-3 rounded hover:bg-opacity-90 transition shadow"
             >
-              Continue to Payment
+              Continue to Coupon & Payment
             </button>
           </div>
         ) : (
           <div>
-             <h3 className="font-bold mb-4">Payment Method</h3>
+             {/* COUPON CODE SECTION */}
+             <div className="mb-6 bg-amber-50/70 border border-amber-200 p-4 rounded-xl space-y-3">
+               <div className="flex items-center justify-between">
+                 <h4 className="font-bold text-sm text-amber-950 flex items-center gap-1.5">
+                   <Tag size={16} className="text-amber-700" /> Apply Discount Coupon
+                 </h4>
+                 {appliedCoupon && (
+                   <span className="bg-green-100 text-green-800 text-xs px-2.5 py-0.5 rounded-full font-bold border border-green-300 flex items-center gap-1">
+                     <CheckCircle size={12} /> {appliedCoupon.discountPercent}% OFF APPLIED
+                   </span>
+                 )}
+               </div>
+
+               {appliedCoupon ? (
+                 <div className="flex items-center justify-between bg-white p-3 rounded-lg border border-green-300 text-sm">
+                   <div>
+                     <span className="font-mono font-black text-green-700">{appliedCoupon.code}</span>
+                     <span className="text-xs text-gray-500 ml-2 font-medium">({appliedCoupon.discountPercent}% Discount saved ₹{discountAmount})</span>
+                   </div>
+                   <button
+                     type="button"
+                     onClick={handleRemoveCoupon}
+                     className="text-xs font-bold text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded transition"
+                   >
+                     Remove
+                   </button>
+                 </div>
+               ) : (
+                 <div className="flex gap-2">
+                   <input
+                     type="text"
+                     className="flex-1 border uppercase font-mono font-bold px-3 py-2 text-sm rounded-lg focus:ring-2 focus:ring-tea-green outline-none bg-white placeholder:normal-case placeholder:font-normal"
+                     placeholder="Enter coupon code (e.g. WELCOME10)"
+                     value={couponCodeInput}
+                     onChange={e => setCouponCodeInput(e.target.value.toUpperCase())}
+                     onKeyDown={e => { if (e.key === 'Enter') handleApplyCoupon(); }}
+                   />
+                   <button
+                     type="button"
+                     onClick={() => handleApplyCoupon()}
+                     className="bg-tea-dark hover:bg-black text-white px-4 py-2 rounded-lg text-xs font-bold transition shadow-sm"
+                   >
+                     Apply
+                   </button>
+                 </div>
+               )}
+
+               {couponMessage && (
+                 <p className={`text-xs font-semibold ${couponMessage.isError ? 'text-red-600' : 'text-green-700'}`}>
+                   {couponMessage.text}
+                 </p>
+               )}
+
+               {/* Available Active Coupons quick click pills */}
+               {!appliedCoupon && activeCoupons.length > 0 && (
+                 <div className="pt-1">
+                   <span className="text-[11px] text-gray-500 font-semibold block mb-1.5">Available Offers:</span>
+                   <div className="flex flex-wrap gap-1.5">
+                     {activeCoupons.slice(0, 4).map(c => (
+                       <button
+                         key={c.id}
+                         type="button"
+                         onClick={() => handleApplyCoupon(c.code)}
+                         className="text-[11px] font-mono font-bold bg-white text-tea-dark border border-amber-300 hover:bg-amber-100 px-2 py-0.5 rounded shadow-2xs transition flex items-center gap-1"
+                       >
+                         <Percent size={10} className="text-amber-600" /> {c.code} ({c.discountPercent}% off)
+                       </button>
+                     ))}
+                   </div>
+                 </div>
+               )}
+             </div>
+
+             <h3 className="font-bold mb-4">Select Payment Method</h3>
              <div className="space-y-3 mb-6">
                {['UPI', 'Card', 'MANUAL_UPI', 'COD'].map((method) => (
                  <label key={method} className="flex flex-col p-4 border rounded cursor-pointer hover:bg-gray-50 transition">
@@ -711,7 +823,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
                       className="mr-3"
                      />
                      <span className="font-medium text-sm md:text-base">
-                       {method === 'UPI' ? 'UPI (GPay/PhonePe/Paytm - Auto)' : method === 'Card' ? 'Credit/Debit Card / NetBanking' : method === 'MANUAL_UPI' ? 'Direct UPI Transfer / Scan QR (Manual/Zero-Fee)' : 'Cash on Delivery'}
+                       {method === 'UPI' ? 'UPI (GPay/PhonePe/Paytm - Auto Instant)' : method === 'Card' ? 'Credit/Debit Card / NetBanking' : method === 'MANUAL_UPI' ? 'Direct UPI Transfer / Scan QR (Manual/Zero-Fee)' : 'Cash on Delivery'}
                      </span>
                    </div>
 
@@ -794,7 +906,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
                          <div>
                            <label className="block text-xs font-bold text-gray-600 mb-1">Your UPI ID or Paid Mobile Number</label>
                            <input 
-                             type="text"
+                             type="text" 
                              className="w-full border rounded p-2.5 text-sm focus:ring-2 focus:ring-tea-green outline-none"
                              placeholder="e.g. yourname@okaxis or mobile number"
                              value={customerUpi}
@@ -804,7 +916,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
                          <div>
                            <label className="block text-xs font-bold text-gray-600 mb-1">12-Digit UPI Ref No. / Transaction ID / UTR</label>
                            <input 
-                             type="text"
+                             type="text" 
                              maxLength={24}
                              className="w-full border rounded p-2.5 text-sm font-mono focus:ring-2 focus:ring-tea-green outline-none"
                              placeholder="e.g. 612345678901"
@@ -819,8 +931,19 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
                ))}
              </div>
              
-             <div className="border-t pt-4 mb-4">
-               <div className="flex justify-between text-xl font-bold">
+             {/* PRICE BREAKDOWN */}
+             <div className="border-t pt-4 mb-4 space-y-1.5">
+               <div className="flex justify-between text-sm text-gray-600">
+                 <span>Items Subtotal</span>
+                 <span className="font-medium">₹{subtotal}</span>
+               </div>
+               {discountAmount > 0 && (
+                 <div className="flex justify-between text-sm text-green-700 font-bold bg-green-50 px-2 py-1 rounded">
+                   <span>Coupon Discount ({appliedCoupon?.code}):</span>
+                   <span>- ₹{discountAmount}</span>
+                 </div>
+               )}
+               <div className="flex justify-between text-xl font-black text-tea-dark border-t pt-2 mt-2">
                  <span>Total Payable</span>
                  <span>₹{total}</span>
                </div>
@@ -829,7 +952,7 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
                </p>
                {payment !== 'COD' && payment !== 'MANUAL_UPI' && (
                  <div className="text-xs text-gray-500 mt-2">
-                   * Secure payment via Razorpay
+                   * Secure online payment via Razorpay
                  </div>
                )}
                {payment === 'MANUAL_UPI' && (
@@ -841,16 +964,16 @@ const CheckoutPage = ({ onOrderPlaced }: { onOrderPlaced: () => void }) => {
 
              <button 
               onClick={handlePlaceOrder}
-              className="w-full bg-tea-red text-white font-bold py-3 rounded hover:bg-red-700 transition"
+              className="w-full bg-tea-red text-white font-bold py-3.5 rounded-lg hover:bg-red-700 transition shadow"
              >
-              {payment === 'COD' ? 'Place Order' : payment === 'MANUAL_UPI' ? 'Confirm & Place Order' : 'Pay & Order'}
+              {payment === 'COD' ? `Place Order (₹${total})` : payment === 'MANUAL_UPI' ? `Confirm & Place Order (₹${total})` : `Pay & Place Order (₹${total})`}
              </button>
              <button 
               onClick={() => setStep(1)}
-              className="w-full mt-2 text-gray-500 py-2"
-            >
-              Back
-            </button>
+              className="w-full mt-2 text-gray-500 py-2 hover:text-gray-800 transition text-sm"
+             >
+              ← Back to Address
+             </button>
           </div>
         )}
       </div>

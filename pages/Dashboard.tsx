@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { useStore } from '../services/store';
 import { ReviewModal } from '../components/ReviewModal';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
-import { Package, DollarSign, Users, CheckCircle, XCircle, Printer, AlertTriangle, FileText, PlusCircle, Trash2, Settings, Save, TrendingUp, ClipboardList, CreditCard, Download, UploadCloud, Image as ImageIcon, RotateCcw, KeyRound, Star, MessageSquare, Edit, Phone, MapPin, User as UserIcon, Mail, Paperclip, Eye, ExternalLink, FileCheck, Search, Filter, Calendar, FileSpreadsheet, X } from 'lucide-react';
-import { Product, Order, User, PurchaseItem, PurchaseOrder, InvoiceSettings, PaymentSettings, BrandAssets, Role, Review } from '../types';
+import { Package, DollarSign, Users, CheckCircle, XCircle, Printer, AlertTriangle, FileText, PlusCircle, Trash2, Settings, Save, TrendingUp, ClipboardList, CreditCard, Download, UploadCloud, Image as ImageIcon, RotateCcw, KeyRound, Star, MessageSquare, Edit, Phone, MapPin, User as UserIcon, Mail, Paperclip, Eye, ExternalLink, FileCheck, Search, Filter, Calendar, FileSpreadsheet, X, Lock, Tag, Percent, ToggleLeft, ToggleRight, Sparkles } from 'lucide-react';
+import { Product, Order, User, PurchaseItem, PurchaseOrder, InvoiceSettings, PaymentSettings, BrandAssets, Role, Review, Coupon } from '../types';
 
 // --- UTILS ---
 const exportToCSV = (data: any[], filename: string) => {
@@ -814,13 +814,211 @@ const PurchaseOrderForm = ({ products, onClose, onSubmit }: { products: Product[
   );
 };
 
+// --- COUPON FORM MODAL ---
+const CouponFormModal = ({ 
+  coupon, 
+  onClose, 
+  onSubmit 
+}: { 
+  coupon: Coupon | null; 
+  onClose: () => void; 
+  onSubmit: (c: Omit<Coupon, 'id' | 'createdAt'> & { id?: string }) => void; 
+}) => {
+  const [code, setCode] = useState(coupon?.code || '');
+  const [discountPercent, setDiscountPercent] = useState(coupon?.discountPercent || 10);
+  const [minOrderAmount, setMinOrderAmount] = useState<number | undefined>(coupon?.minOrderAmount || 0);
+  const [maxDiscountAmount, setMaxDiscountAmount] = useState<number | undefined>(coupon?.maxDiscountAmount || 0);
+  const [expiryDate, setExpiryDate] = useState(coupon?.expiryDate || '');
+  const [description, setDescription] = useState(coupon?.description || '');
+  const [isActive, setIsActive] = useState(coupon ? coupon.isActive : true);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!code.trim()) {
+      alert("Please enter a valid coupon code (e.g. WELCOME10, AMRIT20)");
+      return;
+    }
+    if (discountPercent <= 0 || discountPercent > 100) {
+      alert("Discount percentage must be between 1% and 100%");
+      return;
+    }
+
+    onSubmit({
+      ...(coupon ? { id: coupon.id } : {}),
+      code: code.trim().toUpperCase(),
+      discountPercent: Number(discountPercent),
+      minOrderAmount: minOrderAmount ? Number(minOrderAmount) : undefined,
+      maxDiscountAmount: maxDiscountAmount ? Number(maxDiscountAmount) : undefined,
+      expiryDate: expiryDate ? expiryDate : undefined,
+      description: description.trim(),
+      isActive
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+      <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-gray-100 max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center pb-4 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-amber-100 rounded-lg text-amber-800">
+              <Tag size={20} />
+            </div>
+            <div>
+              <h3 className="font-bold text-lg text-gray-900">
+                {coupon ? 'Edit Discount Coupon' : 'Create New Discount Coupon'}
+              </h3>
+              <p className="text-xs text-gray-500">Configure promotional discount percentage & status</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-100 transition">
+            <X size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4 pt-4">
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1">
+              Coupon Code <span className="text-red-500">*</span>
+            </label>
+            <input 
+              type="text" 
+              required
+              className="w-full border rounded-lg p-2.5 font-mono uppercase font-bold text-base focus:ring-2 focus:ring-amber-500 outline-none"
+              placeholder="e.g. FESTIVE20, WELCOME10, TEA50"
+              value={code}
+              onChange={e => setCode(e.target.value.toUpperCase())}
+            />
+            <span className="text-[11px] text-gray-400 mt-1 block">Customers will enter this code at checkout.</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1">
+                Discount (%) <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <input 
+                  type="number" 
+                  min="1" 
+                  max="100" 
+                  required
+                  className="w-full border rounded-lg p-2.5 pl-8 font-bold focus:ring-2 focus:ring-amber-500 outline-none"
+                  placeholder="e.g. 10"
+                  value={discountPercent}
+                  onChange={e => setDiscountPercent(Number(e.target.value))}
+                />
+                <Percent size={14} className="absolute left-2.5 top-3.5 text-gray-400" />
+              </div>
+              <span className="text-[11px] text-gray-400 mt-1 block">% discount on total order</span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1">
+                Status / Enable
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsActive(!isActive)}
+                className={`w-full py-2.5 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-2 border transition ${
+                  isActive 
+                    ? 'bg-green-50 text-green-700 border-green-300 hover:bg-green-100' 
+                    : 'bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200'
+                }`}
+              >
+                {isActive ? <ToggleRight size={18} className="text-green-600" /> : <ToggleLeft size={18} className="text-gray-400" />}
+                <span>{isActive ? 'Active (Enabled)' : 'Disabled / Inactive'}</span>
+              </button>
+              <span className="text-[11px] text-gray-400 mt-1 block">Can be toggled anytime</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1">
+                Min. Order Value (₹) <span className="text-gray-400 font-normal">(Optional)</span>
+              </label>
+              <input 
+                type="number" 
+                min="0"
+                className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                placeholder="0 (No minimum)"
+                value={minOrderAmount || ''}
+                onChange={e => setMinOrderAmount(e.target.value ? Number(e.target.value) : undefined)}
+              />
+              <span className="text-[11px] text-gray-400 mt-1 block">Minimum subtotal required to apply</span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1">
+                Max Discount Cap (₹) <span className="text-gray-400 font-normal">(Optional)</span>
+              </label>
+              <input 
+                type="number" 
+                min="0"
+                className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                placeholder="0 (No maximum limit)"
+                value={maxDiscountAmount || ''}
+                onChange={e => setMaxDiscountAmount(e.target.value ? Number(e.target.value) : undefined)}
+              />
+              <span className="text-[11px] text-gray-400 mt-1 block">Maximum discount cap in Rupees</span>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1">
+              Expiry Date <span className="text-gray-400 font-normal">(Optional)</span>
+            </label>
+            <input 
+              type="date"
+              className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+              value={expiryDate}
+              onChange={e => setExpiryDate(e.target.value)}
+            />
+            <span className="text-[11px] text-gray-400 mt-1 block">Leave empty for lifetime / no expiration</span>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1">
+              Description / Internal Note
+            </label>
+            <input 
+              type="text"
+              className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+              placeholder="e.g. 10% off for festival season and new customers"
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t">
+            <button 
+              type="button" 
+              onClick={onClose} 
+              className="px-4 py-2.5 rounded-lg border text-sm font-bold text-gray-600 hover:bg-gray-50 transition"
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold shadow transition flex items-center gap-1.5"
+            >
+              <CheckCircle size={16} /> {coupon ? 'Update Coupon' : 'Create Coupon'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 export const Dashboard = () => {
   const { 
     user, orders, products, users, invoiceSettings, purchaseOrders, paymentSettings, brandAssets, reviews,
     updateInvoiceSettings, addUser, addOrder, addPurchaseOrder, receivePurchaseOrder, updatePurchaseOrderBill,
     updatePaymentStatus, approveDistributor, updateOrderStatus, deleteOrder, deletePurchaseOrder,
     addProduct, deleteProduct, updateProduct, updateStock, updatePaymentSettings, updateBrandAssets,
-    clearOnlineOrders, updateUserPassword, updateReview, deleteReview, addFakeReview
+    clearOnlineOrders, updateUserPassword, updateReview, deleteReview, addFakeReview,
+    coupons, addCoupon, updateCoupon, toggleCouponStatus, deleteCoupon
   } = useStore();
   
   const [activeTab, setActiveTab] = useState('OVERVIEW');
@@ -832,6 +1030,10 @@ export const Dashboard = () => {
   const [showManualOrder, setShowManualOrder] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
   const [showPOForm, setShowPOForm] = useState(false);
+  const [showCouponModal, setShowCouponModal] = useState(false);
+  const [editingCoupon, setEditingCoupon] = useState<Coupon | null>(null);
+  const [couponSearch, setCouponSearch] = useState('');
+  const [couponStatusFilter, setCouponStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
   const [passwordModalUser, setPasswordModalUser] = useState<{id: string, name: string} | null>(null);
   const [reviewProduct, setReviewProduct] = useState<Product | null>(null);
   const [editingReview, setEditingReview] = useState<Review | null>(null);
@@ -1071,7 +1273,7 @@ export const Dashboard = () => {
        { name: 'Cash on Delivery', value: codTotalCaptured, color: '#eab308' }
     ];
 
-    const TABS = ['OVERVIEW', 'REPORTS', 'PAYMENTS', 'ORDERS', 'PURCHASE', 'INVENTORY', 'PRODUCTS', 'USERS', 'REVIEWS', 'SETTINGS'];
+    const TABS = ['OVERVIEW', 'REPORTS', 'PAYMENTS', 'COUPONS', 'ORDERS', 'PURCHASE', 'INVENTORY', 'PRODUCTS', 'USERS', 'REVIEWS', 'SETTINGS'];
 
     return (
       <div className="container mx-auto px-4 py-8">
@@ -1589,7 +1791,226 @@ export const Dashboard = () => {
             </div>
         )}
 
-        {/* ... Rest of the tabs (Purchase, Orders, Inventory, Products, Users, Settings) remain the same ... */}
+        {activeTab === 'COUPONS' && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Header & Quick Stats */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-xl border border-gray-200 shadow-xs">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                  <Tag className="text-amber-600" size={22} />
+                  Discount Coupons & Promo Codes
+                </h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  Create discount codes for retail customers and distributors. Enable or disable anytime.
+                </p>
+              </div>
+              <button 
+                onClick={() => {
+                  setEditingCoupon(null);
+                  setShowCouponModal(true);
+                }} 
+                className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2.5 rounded-lg font-bold shadow flex items-center gap-2 transition text-sm shrink-0"
+              >
+                <PlusCircle size={18} /> Create New Coupon
+              </button>
+            </div>
+
+            {/* Quick Metrics */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block">Total Coupons</span>
+                <span className="text-2xl font-black text-gray-900 mt-1 block">{coupons.length}</span>
+              </div>
+              <div className="bg-green-50 p-4 rounded-xl border border-green-200 shadow-xs">
+                <span className="text-xs font-bold text-green-700 uppercase tracking-wider block">Active / Enabled</span>
+                <span className="text-2xl font-black text-green-800 mt-1 block">
+                  {coupons.filter(c => c.isActive).length}
+                </span>
+              </div>
+              <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 shadow-xs">
+                <span className="text-xs font-bold text-amber-700 uppercase tracking-wider block">Avg. Discount</span>
+                <span className="text-2xl font-black text-amber-800 mt-1 block">
+                  {coupons.length > 0 ? `${Math.round(coupons.reduce((sum, c) => sum + c.discountPercent, 0) / coupons.length)}%` : '0%'}
+                </span>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-xs">
+                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Disabled / Inactive</span>
+                <span className="text-2xl font-black text-gray-600 mt-1 block">
+                  {coupons.filter(c => !c.isActive).length}
+                </span>
+              </div>
+            </div>
+
+            {/* Filter & Search Bar */}
+            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs flex flex-col md:flex-row gap-3 items-center justify-between">
+              <div className="relative flex-1 w-full">
+                <Search size={16} className="absolute left-3 top-3 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search coupons by code or description..."
+                  className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                  value={couponSearch}
+                  onChange={e => setCouponSearch(e.target.value)}
+                />
+              </div>
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                <Filter size={16} className="text-gray-400 shrink-0" />
+                <select
+                  value={couponStatusFilter}
+                  onChange={e => setCouponStatusFilter(e.target.value as any)}
+                  className="border rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-amber-500 outline-none w-full md:w-auto"
+                >
+                  <option value="ALL">All Status</option>
+                  <option value="ACTIVE">Active Only</option>
+                  <option value="INACTIVE">Disabled Only</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Coupons List */}
+            {(() => {
+              const filteredCoupons = coupons.filter(c => {
+                if (couponStatusFilter === 'ACTIVE' && !c.isActive) return false;
+                if (couponStatusFilter === 'INACTIVE' && c.isActive) return false;
+                if (couponSearch.trim()) {
+                  const q = couponSearch.toLowerCase().trim();
+                  const matchCode = c.code.toLowerCase().includes(q);
+                  const matchDesc = c.description?.toLowerCase().includes(q);
+                  if (!matchCode && !matchDesc) return false;
+                }
+                return true;
+              });
+
+              if (filteredCoupons.length === 0) {
+                return (
+                  <div className="bg-white p-12 rounded-xl border border-gray-200 text-center space-y-4">
+                    <Tag size={48} className="mx-auto text-gray-300" />
+                    <div>
+                      <h4 className="text-base font-bold text-gray-800">No coupons found</h4>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {couponSearch || couponStatusFilter !== 'ALL' 
+                          ? "Try changing your search or filter."
+                          : "Create your first discount coupon code to boost store sales."}
+                      </p>
+                    </div>
+                    {!couponSearch && couponStatusFilter === 'ALL' && (
+                      <button
+                        onClick={() => {
+                          setEditingCoupon(null);
+                          setShowCouponModal(true);
+                        }}
+                        className="bg-amber-600 hover:bg-amber-700 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-xs transition inline-flex items-center gap-1.5"
+                      >
+                        <PlusCircle size={16} /> Create First Coupon
+                      </button>
+                    )}
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredCoupons.map(coupon => {
+                    const isExpired = coupon.expiryDate && new Date(coupon.expiryDate) < new Date(new Date().setHours(0,0,0,0));
+
+                    return (
+                      <div 
+                        key={coupon.id} 
+                        className={`bg-white rounded-xl border p-5 shadow-xs transition flex flex-col justify-between ${
+                          !coupon.isActive ? 'border-gray-200 opacity-75 bg-gray-50/50' : isExpired ? 'border-amber-200 bg-amber-50/20' : 'border-amber-200 hover:border-amber-400 hover:shadow-md'
+                        }`}
+                      >
+                        <div>
+                          {/* Top row: Code badge & Status toggle */}
+                          <div className="flex items-center justify-between gap-2 mb-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono font-black text-lg text-gray-900 bg-amber-100/70 border border-amber-300 px-2.5 py-1 rounded-lg tracking-wider select-all">
+                                {coupon.code}
+                              </span>
+                              <span className="text-xs font-black bg-green-600 text-white px-2 py-0.5 rounded-md">
+                                {coupon.discountPercent}% OFF
+                              </span>
+                            </div>
+
+                            <button
+                              onClick={() => toggleCouponStatus(coupon.id)}
+                              className={`p-1 rounded-full transition flex items-center gap-1 text-xs font-bold ${
+                                coupon.isActive 
+                                  ? 'text-green-600 hover:text-green-800' 
+                                  : 'text-gray-400 hover:text-gray-600'
+                              }`}
+                              title={coupon.isActive ? "Click to Disable Coupon" : "Click to Enable Coupon"}
+                            >
+                              {coupon.isActive ? <ToggleRight size={28} className="text-green-600" /> : <ToggleLeft size={28} className="text-gray-400" />}
+                            </button>
+                          </div>
+
+                          {/* Description */}
+                          {coupon.description && (
+                            <p className="text-xs text-gray-600 mb-3 line-clamp-2">
+                              {coupon.description}
+                            </p>
+                          )}
+
+                          {/* Rule chips */}
+                          <div className="space-y-1.5 text-xs text-gray-600 border-t pt-3 border-gray-100">
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Min. Order:</span>
+                              <span className="font-semibold">{coupon.minOrderAmount ? `₹${coupon.minOrderAmount}` : 'No minimum'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Max Discount:</span>
+                              <span className="font-semibold">{coupon.maxDiscountAmount ? `₹${coupon.maxDiscountAmount}` : 'No limit'}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-gray-400">Valid Till:</span>
+                              <span className={`font-semibold ${isExpired ? 'text-red-600' : ''}`}>
+                                {coupon.expiryDate ? `${coupon.expiryDate} ${isExpired ? '(Expired)' : ''}` : 'Lifetime'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Bottom Actions */}
+                        <div className="flex items-center justify-between pt-4 mt-4 border-t border-gray-100 text-xs">
+                          <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] uppercase tracking-wider ${
+                            !coupon.isActive ? 'bg-gray-200 text-gray-700' : isExpired ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'
+                          }`}>
+                            {!coupon.isActive ? 'Disabled' : isExpired ? 'Expired' : 'Active'}
+                          </span>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => {
+                                setEditingCoupon(coupon);
+                                setShowCouponModal(true);
+                              }}
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition"
+                              title="Edit Coupon"
+                            >
+                              <Edit size={16} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (confirm(`Are you sure you want to delete coupon "${coupon.code}"?`)) {
+                                  deleteCoupon(coupon.id);
+                                }
+                              }}
+                              className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition"
+                              title="Delete Coupon"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        )}
         {activeTab === 'PURCHASE' && (
             <div className="animate-fade-in">
                  <div className="flex justify-between items-center mb-4">
@@ -2554,6 +2975,26 @@ export const Dashboard = () => {
         {/* Invoice Modal - ADDED */}
         {viewInvoice && (
           <InvoiceTemplate order={viewInvoice} onClose={() => setViewInvoice(null)} />
+        )}
+
+        {/* Coupon Form Modal */}
+        {showCouponModal && (
+          <CouponFormModal 
+            coupon={editingCoupon} 
+            onClose={() => {
+              setShowCouponModal(false);
+              setEditingCoupon(null);
+            }} 
+            onSubmit={(c) => {
+              if (editingCoupon) {
+                updateCoupon({ ...editingCoupon, ...c });
+              } else {
+                addCoupon(c);
+              }
+              setShowCouponModal(false);
+              setEditingCoupon(null);
+            }} 
+          />
         )}
       </div>
     );

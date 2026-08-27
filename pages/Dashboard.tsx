@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useStore } from '../services/store';
 import { ReviewModal } from '../components/ReviewModal';
+import { ExpensesTab } from '../components/ExpensesTab';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
-import { Package, DollarSign, Users, CheckCircle, XCircle, Printer, AlertTriangle, FileText, PlusCircle, Trash2, Settings, Save, TrendingUp, ClipboardList, CreditCard, Download, UploadCloud, Image as ImageIcon, RotateCcw, KeyRound, Star, MessageSquare, Edit, Phone, MapPin, User as UserIcon, Mail, Paperclip, Eye, ExternalLink, FileCheck, Search, Filter, Calendar, FileSpreadsheet, X, Lock, Tag, Percent, ToggleLeft, ToggleRight, Sparkles } from 'lucide-react';
-import { Product, Order, User, PurchaseItem, PurchaseOrder, InvoiceSettings, PaymentSettings, BrandAssets, Role, Review, Coupon } from '../types';
+import { Package, DollarSign, Users, CheckCircle, XCircle, Printer, AlertTriangle, FileText, PlusCircle, Trash2, Settings, Save, TrendingUp, ClipboardList, CreditCard, Download, UploadCloud, Image as ImageIcon, RotateCcw, KeyRound, Star, MessageSquare, Edit, Phone, MapPin, User as UserIcon, Mail, Paperclip, Eye, ExternalLink, FileCheck, Search, Filter, Calendar, FileSpreadsheet, X, Lock, Tag, Percent, ToggleLeft, ToggleRight, Sparkles, Send, Truck, Bell, ShieldCheck, Check, Receipt, Wallet, Copy, Share2, Navigation, CheckCheck, Gift, Activity } from 'lucide-react';
+import { Product, Order, User, PurchaseItem, PurchaseOrder, ExpenseRecord, InvoiceSettings, PaymentSettings, BrandAssets, Role, Review, Coupon, SMSNotification, SMSProviderSettings, formatOrderId } from '../types';
 
 // --- UTILS ---
 const exportToCSV = (data: any[], filename: string) => {
@@ -57,9 +58,11 @@ const getOrderCustomerDetails = (order: Order, usersList: User[]) => {
   return { name, mobile, city, fullAddress: order.userAddress || 'N/A' };
 };
 
-// --- INVOICE COMPONENT ---
+// --- DUAL INVOICE COMPONENT (B2B WHOLESALE vs B2C RETAIL) ---
 const InvoiceTemplate = ({ order, onClose }: { order: Order; onClose: () => void }) => {
-  const { invoiceSettings } = useStore();
+  const { invoiceSettings, users } = useStore();
+  const isB2B = order.type === 'WHOLESALE';
+  const customerMobile = order.userMobile || users?.find(u => u.id === order.userId)?.mobile || '';
   
   const handlePrint = () => {
     const printContent = document.getElementById('invoice-content');
@@ -72,121 +75,292 @@ const InvoiceTemplate = ({ order, onClose }: { order: Order; onClose: () => void
     }
   };
 
+  // Tax calculations based on role:
+  // B2B (Distributor/Retailer): GST is EXCLUSIVE (5% GST added on top of base rate)
+  // B2C (Customer): GST is INCLUDED in MRP
+  const itemsSubtotal = order.items.reduce((sum, item) => {
+    const price = isB2B ? item.distributorPrice : item.mrp;
+    return sum + (price * item.quantity);
+  }, 0);
+
+  const discountVal = order.discountAmount || 0;
+  const taxableBase = isB2B 
+    ? Math.max(0, itemsSubtotal - discountVal) 
+    : order.totalAmount / 1.05;
+    
+  const totalTax = isB2B 
+    ? Math.round(taxableBase * 0.05 * 100) / 100 
+    : Math.round((order.totalAmount - taxableBase) * 100) / 100;
+
+  const cgstVal = Math.round((totalTax / 2) * 100) / 100;
+  const sgstVal = Math.round((totalTax / 2) * 100) / 100;
+  const grandTotal = isB2B ? Math.round(taxableBase + totalTax) : order.totalAmount;
+
   return (
     <div className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl my-8">
-        <div className="flex justify-between items-center p-4 border-b">
-          <h2 className="text-lg font-bold">Tax Invoice</h2>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl my-8">
+        <div className="flex justify-between items-center p-4 border-b bg-gray-50 rounded-t-xl">
+          <div className="flex items-center gap-3">
+            <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
+              isB2B ? 'bg-purple-100 text-purple-900 border border-purple-300' : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+            }`}>
+              {isB2B ? 'B2B Commercial Invoice (GST Exclusive)' : 'Retail Tax Invoice (GST Included in MRP)'}
+            </span>
+            <span className="text-sm font-semibold text-gray-500 font-mono">#{order.invoiceNumber || order.id}</span>
+          </div>
           <div className="flex gap-2">
-            <button onClick={handlePrint} className="bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2 hover:bg-blue-700">
-              <Printer size={16} /> Print
+            <button onClick={handlePrint} className="bg-tea-dark text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-black transition text-sm">
+              <Printer size={16} /> Print Bill
             </button>
-            <button onClick={onClose} className="bg-gray-200 text-gray-800 px-4 py-2 rounded hover:bg-gray-300">
+            <button onClick={onClose} className="bg-gray-200 text-gray-800 px-4 py-2 rounded-lg font-bold hover:bg-gray-300 transition text-sm">
               Close
             </button>
           </div>
         </div>
         
-        <div id="invoice-content" className="p-8 bg-white text-black">
+        <div id="invoice-content" className="p-8 bg-white text-black font-sans">
           {/* Header */}
-          <div className="flex justify-between items-start mb-8 border-b-2 border-tea-dark pb-4">
+          <div className="flex justify-between items-start mb-6 border-b-2 border-tea-dark pb-6">
             <div>
-               <h1 className="text-3xl font-bold text-tea-dark uppercase">{invoiceSettings.companyName}</h1>
-               <p className="text-sm">{invoiceSettings.addressLine1}</p>
-               <p className="text-sm">{invoiceSettings.addressLine2}</p>
-               <p className="text-sm">GSTIN: {invoiceSettings.gstin}</p>
-               {invoiceSettings.email && <p className="text-sm">Email: {invoiceSettings.email}</p>}
-               {invoiceSettings.phone && <p className="text-sm">Phone: {invoiceSettings.phone}</p>}
+               <h1 className="text-3xl font-black text-tea-dark tracking-tight uppercase">{invoiceSettings.companyName}</h1>
+               <p className="text-xs text-gray-700 font-medium">{invoiceSettings.addressLine1}</p>
+               <p className="text-xs text-gray-700 font-medium">{invoiceSettings.addressLine2}</p>
+               <div className="mt-2 space-y-0.5 text-xs text-gray-800">
+                 <p><strong className="text-gray-900">GSTIN:</strong> {invoiceSettings.gstin}</p>
+                 <p><strong className="text-gray-900">State / Code:</strong> Assam (18) / Maharashtra (27)</p>
+                 {invoiceSettings.email && <p><strong className="text-gray-900">Email:</strong> {invoiceSettings.email}</p>}
+                 {invoiceSettings.phone && <p><strong className="text-gray-900">Phone:</strong> {invoiceSettings.phone}</p>}
+               </div>
             </div>
+
             <div className="text-right">
-              <h2 className="text-xl font-bold text-gray-600">INVOICE</h2>
-              <p className="font-bold">#{order.invoiceNumber || order.id}</p>
-              <p>Date: {order.date}</p>
-              <div className={`mt-2 border-2 px-2 py-1 inline-block font-bold rounded ${order.paymentStatus === 'Paid' ? 'border-green-600 text-green-600' : 'border-red-600 text-red-600'}`}>
-                {order.paymentStatus.toUpperCase()}
+              <div className="inline-block text-right">
+                <span className={`text-xs font-black uppercase px-2.5 py-1 rounded border tracking-wider block mb-1.5 ${
+                  isB2B ? 'bg-purple-50 text-purple-900 border-purple-300' : 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                }`}>
+                  {isB2B ? 'COMMERCIAL TAX INVOICE' : 'RETAIL TAX INVOICE'}
+                </span>
+                <p className="font-mono font-bold text-lg text-gray-900">#{order.invoiceNumber || order.id}</p>
+                <p className="text-xs text-gray-600 font-medium">Date: <strong>{order.date}</strong></p>
+                <p className="text-xs text-gray-600 font-medium">Place of Supply: <strong>India</strong></p>
+                <div className={`mt-2 border-2 px-3 py-0.5 inline-block font-black text-xs rounded uppercase tracking-wider ${
+                  order.paymentStatus === 'Paid' ? 'border-green-600 text-green-700 bg-green-50' : 'border-amber-600 text-amber-700 bg-amber-50'
+                }`}>
+                  {order.paymentStatus} ({order.paymentMethod})
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Bill To */}
-          <div className="mb-8">
-            <h3 className="font-bold text-gray-600 border-b mb-2">BILL TO</h3>
-            <p className="font-bold text-lg">{order.userName}</p>
-            {(order.userMobile || users?.find(u => u.id === order.userId)?.mobile) && (
-              <p className="text-gray-700 font-medium">Mobile: {order.userMobile || users?.find(u => u.id === order.userId)?.mobile}</p>
-            )}
-            <p className="text-gray-700 w-1/2">{order.userAddress || 'Address not provided'}</p>
-            <p className="text-gray-700">Role: {order.type}</p>
-            {order.userGst && <p className="text-gray-700">GST: {order.userGst}</p>}
-          </div>
-
-          {/* Table */}
-          <table className="w-full mb-8 text-sm">
-            <thead>
-              <tr className="bg-gray-100 border-b-2 border-black">
-                <th className="text-left p-2">Item Details</th>
-                <th className="text-center p-2">HSN</th>
-                <th className="text-center p-2">Qty</th>
-                <th className="text-right p-2">MRP / Rate (₹)<br/><span className="text-[10px] font-normal text-gray-500">(Incl. 5% GST)</span></th>
-                <th className="text-right p-2">Amount (₹)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {order.items.map((item, index) => {
-                const price = order.type === 'WHOLESALE' ? item.distributorPrice : item.mrp;
-                return (
-                  <tr key={index} className="border-b">
-                    <td className="p-2">
-                      <div className="font-bold">{item.name}</div>
-                      <div className="text-xs text-gray-500">{item.weight}</div>
-                    </td>
-                    <td className="text-center p-2 font-mono">0902</td>
-                    <td className="text-center p-2 font-medium">{item.quantity}</td>
-                    <td className="text-right p-2">₹{price}</td>
-                    <td className="text-right p-2 font-medium">₹{(price * item.quantity).toLocaleString()}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-
-          {/* Totals & Tax Breakdown (GST Included in MRP) */}
-          <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-4">
-            <div className="text-xs text-gray-500 max-w-xs border rounded p-3 bg-gray-50">
-              <p className="font-bold text-gray-700 mb-1">Tax Summary (HSN 0902 - Tea):</p>
-              <p>• CGST @ 2.5%: ₹{((order.totalAmount - (order.totalAmount / 1.05)) / 2).toFixed(2)}</p>
-              <p>• SGST @ 2.5%: ₹{((order.totalAmount - (order.totalAmount / 1.05)) / 2).toFixed(2)}</p>
-              <p className="mt-1 text-[11px] text-gray-600 italic">* All item prices are inclusive of 5% Goods and Services Tax (GST).</p>
+          {/* Bill To / Ship To */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 bg-gray-50 p-4 rounded-lg border border-gray-200">
+            <div>
+              <h3 className="text-xs font-black uppercase text-gray-500 tracking-wider mb-1.5">
+                {isB2B ? 'BUYER (BILLED & SHIPPED TO)' : 'CUSTOMER DETAILS'}
+              </h3>
+              <p className="font-black text-base text-gray-900">{order.userName}</p>
+              {customerMobile && (
+                <p className="text-xs text-gray-800 font-semibold mt-0.5">Mobile: {customerMobile}</p>
+              )}
+              <p className="text-xs text-gray-700 mt-1 max-w-sm">{order.userAddress || 'Address not provided'}</p>
             </div>
-            
-            <div className="w-full sm:w-1/2">
-              <div className="flex justify-between py-1.5 border-b text-sm">
-                <span className="text-gray-600">Taxable Value (Excl. GST):</span>
-                <span className="font-medium">₹{(order.totalAmount / 1.05).toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between py-1.5 border-b text-sm">
-                <span className="text-gray-600">CGST (2.5%):</span>
-                <span>₹{((order.totalAmount - (order.totalAmount / 1.05)) / 2).toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between py-1.5 border-b text-sm">
-                <span className="text-gray-600">SGST (2.5%):</span>
-                <span>₹{((order.totalAmount - (order.totalAmount / 1.05)) / 2).toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between py-1.5 border-b text-sm text-tea-dark font-medium bg-tea-light/10 px-2 rounded">
-                <span>Total GST Amount (5% Included):</span>
-                <span>₹{(order.totalAmount - (order.totalAmount / 1.05)).toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between py-2 border-b-2 border-black font-bold text-lg mt-2 text-tea-dark">
-                <span>Grand Total (MRP Incl. GST):</span>
-                <span>₹{order.totalAmount.toLocaleString()}</span>
-              </div>
+
+            <div className="md:text-right text-xs space-y-1">
+              <p className="text-xs font-black uppercase text-gray-500 tracking-wider">Account Classification</p>
+              <p className="font-bold text-gray-900">
+                Type: <span className="uppercase text-tea-dark font-black">{order.type}</span>
+              </p>
+              {order.userGst ? (
+                <p className="text-purple-900 font-bold bg-purple-50 p-1 rounded inline-block border border-purple-200">
+                  Buyer GSTIN: {order.userGst}
+                </p>
+              ) : isB2B ? (
+                <p className="text-gray-500 italic">Buyer GSTIN: Unregistered / Applied</p>
+              ) : null}
+              {order.trackingNumber && (
+                <p className="text-gray-700">
+                  Tracking: <strong className="font-mono">{order.trackingNumber}</strong> ({order.courierName || 'Standard'})
+                </p>
+              )}
             </div>
           </div>
 
-          {/* Footer */}
-          <div className="mt-12 text-center text-xs text-gray-500">
-            <p>This is a computer generated invoice.</p>
-            <p>{invoiceSettings.footerNote}</p>
+          {/* Items Table */}
+          {isB2B ? (
+            /* B2B Table: GST Exclusive breakdown per line item */
+            <table className="w-full mb-6 text-xs border border-gray-300">
+              <thead>
+                <tr className="bg-gray-100 border-b border-gray-300 text-gray-800">
+                  <th className="text-center p-2 border-r">#</th>
+                  <th className="text-left p-2 border-r">Description of Goods</th>
+                  <th className="text-center p-2 border-r">HSN</th>
+                  <th className="text-center p-2 border-r">Qty</th>
+                  <th className="text-right p-2 border-r">Wholesale Rate<br/><span className="text-[10px] text-gray-500 font-normal">(Excl. GST)</span></th>
+                  <th className="text-right p-2 border-r">Taxable Base (₹)</th>
+                  <th className="text-center p-2 border-r">CGST (2.5%)</th>
+                  <th className="text-center p-2 border-r">SGST (2.5%)</th>
+                  <th className="text-right p-2">Total Amount (₹)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {order.items.map((item, idx) => {
+                  const unitRate = item.distributorPrice;
+                  const itemBase = unitRate * item.quantity;
+                  const itemCgst = Math.round((itemBase * 0.025) * 100) / 100;
+                  const itemSgst = Math.round((itemBase * 0.025) * 100) / 100;
+                  const itemTotal = itemBase + itemCgst + itemSgst;
+
+                  return (
+                    <tr key={idx} className="border-b border-gray-200 hover:bg-gray-50/50">
+                      <td className="text-center p-2 border-r font-medium">{idx + 1}</td>
+                      <td className="p-2 border-r">
+                        <div className="font-bold text-gray-900">{item.name}</div>
+                        <div className="text-[10px] text-gray-500">Unit Pack: {item.weight}</div>
+                      </td>
+                      <td className="text-center p-2 border-r font-mono">0902</td>
+                      <td className="text-center p-2 border-r font-black">{item.quantity}</td>
+                      <td className="text-right p-2 border-r font-mono">₹{unitRate.toFixed(2)}</td>
+                      <td className="text-right p-2 border-r font-mono font-semibold">₹{itemBase.toFixed(2)}</td>
+                      <td className="text-center p-2 border-r font-mono text-[11px]">₹{itemCgst.toFixed(2)}</td>
+                      <td className="text-center p-2 border-r font-mono text-[11px]">₹{itemSgst.toFixed(2)}</td>
+                      <td className="text-right p-2 font-mono font-bold">₹{itemTotal.toFixed(2)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            /* B2C Table: GST Included in MRP */
+            <table className="w-full mb-6 text-xs border border-gray-300">
+              <thead>
+                <tr className="bg-gray-100 border-b border-gray-300 text-gray-800">
+                  <th className="text-center p-2 border-r">#</th>
+                  <th className="text-left p-2 border-r">Item Details</th>
+                  <th className="text-center p-2 border-r">HSN</th>
+                  <th className="text-center p-2 border-r">Qty</th>
+                  <th className="text-right p-2 border-r">MRP / Rate (₹)<br/><span className="text-[10px] text-gray-500 font-normal">(Incl. 5% GST)</span></th>
+                  <th className="text-right p-2">Total Amount (₹)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {order.items.map((item, idx) => {
+                  const price = item.mrp;
+                  return (
+                    <tr key={idx} className="border-b border-gray-200">
+                      <td className="text-center p-2 border-r font-medium">{idx + 1}</td>
+                      <td className="p-2 border-r">
+                        <div className="font-bold text-gray-900">{item.name}</div>
+                        <div className="text-[10px] text-gray-500">Weight: {item.weight}</div>
+                      </td>
+                      <td className="text-center p-2 border-r font-mono">0902</td>
+                      <td className="text-center p-2 border-r font-black">{item.quantity}</td>
+                      <td className="text-right p-2 border-r font-mono">₹{price}</td>
+                      <td className="text-right p-2 font-mono font-bold">₹{(price * item.quantity).toLocaleString()}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+
+          {/* Subtotals & GST Separation Block */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            {/* Left box: GST Tax Details & Statutory Note */}
+            <div className="border rounded-lg p-4 bg-gray-50 text-xs space-y-2">
+              <div className="font-bold text-gray-900 border-b pb-1.5 flex items-center justify-between">
+                <span>Tax Breakdown Matrix (HSN 0902 - Tea)</span>
+                <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${
+                  isB2B ? 'bg-purple-100 text-purple-800' : 'bg-emerald-100 text-emerald-800'
+                }`}>
+                  {isB2B ? 'GST Charged Extra (5%)' : 'GST 5% Included in MRP'}
+                </span>
+              </div>
+
+              <div className="space-y-1 pt-1">
+                <div className="flex justify-between text-gray-600">
+                  <span>Taxable Base Value:</span>
+                  <span className="font-mono font-semibold text-gray-900">₹{taxableBase.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>Central GST (CGST @ 2.5%):</span>
+                  <span className="font-mono font-semibold text-gray-900">₹{cgstVal.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>State GST (SGST @ 2.5%):</span>
+                  <span className="font-mono font-semibold text-gray-900">₹{sgstVal.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-tea-dark font-bold border-t pt-1">
+                  <span>Total Tax Amount (5%):</span>
+                  <span className="font-mono">₹{totalTax.toFixed(2)}</span>
+                </div>
+              </div>
+
+              <p className="text-[10px] text-gray-500 italic pt-1">
+                {isB2B 
+                  ? "* Commercial B2B Invoice: GST is charged exclusive of base wholesale price. Eligible for Input Tax Credit (ITC) under GST rules."
+                  : "* Retail Consumer Invoice: Maximum Retail Price (MRP) includes 5% Goods and Services Tax (GST). No extra tax is collected."}
+              </p>
+            </div>
+
+            {/* Right box: Final Payable Calculation */}
+            <div className="bg-white border rounded-lg p-4 space-y-2 text-xs">
+              <div className="flex justify-between py-1 border-b">
+                <span className="text-gray-600">{isB2B ? 'Wholesale Base Subtotal:' : 'Gross MRP Subtotal:'}</span>
+                <span className="font-mono font-medium">₹{itemsSubtotal.toFixed(2)}</span>
+              </div>
+
+              {discountVal > 0 && (
+                <div className="flex justify-between py-1 border-b text-green-700 font-semibold">
+                  <span>Discount / Coupon ({order.couponCode || 'PROMO'}):</span>
+                  <span className="font-mono">- ₹{discountVal.toFixed(2)}</span>
+                </div>
+              )}
+
+              {isB2B ? (
+                <>
+                  <div className="flex justify-between py-1 border-b font-medium text-gray-800">
+                    <span>Net Taxable Base Value:</span>
+                    <span className="font-mono">₹{taxableBase.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b text-purple-900">
+                    <span>Add: Total GST (5% Exclusive):</span>
+                    <span className="font-mono font-bold">+ ₹{totalTax.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between py-2 border-t-2 border-black font-black text-base text-tea-dark mt-2">
+                    <span>Grand Total Payable (Base + GST):</span>
+                    <span className="font-mono">₹{grandTotal.toLocaleString()}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-between py-1 border-b text-gray-500">
+                    <span>Included 5% GST (CGST+SGST):</span>
+                    <span className="font-mono">₹{totalTax.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between py-2 border-t-2 border-black font-black text-base text-tea-dark mt-2">
+                    <span>Net Amount (MRP Incl. 5% GST):</span>
+                    <span className="font-mono">₹{order.totalAmount.toLocaleString()}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Footer & Signature */}
+          <div className="border-t pt-6 mt-6 flex flex-col md:flex-row justify-between items-end gap-6 text-xs text-gray-600">
+            <div>
+              <p className="font-bold text-gray-800">Declaration & Terms:</p>
+              <p className="text-[11px] text-gray-500 max-w-md mt-0.5">
+                {isB2B 
+                  ? "We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct. Subject to local jurisdiction."
+                  : invoiceSettings.footerNote || "Thank you for choosing Amrit Assam Gold Tea. Goods once sold will not be taken back."}
+              </p>
+            </div>
+
+            <div className="text-right border-t border-gray-400 pt-2 min-w-[180px]">
+              <p className="font-bold text-gray-900 text-xs">For {invoiceSettings.companyName}</p>
+              <p className="text-[10px] text-gray-500 mt-6 font-mono">(Authorized Signatory)</p>
+            </div>
           </div>
         </div>
       </div>
@@ -518,110 +692,1015 @@ const InventoryManager = ({ products, onUpdateStock }: { products: Product[], on
   );
 };
 
-const ManualOrderForm = ({ products, users, onClose, onSubmit }: { products: Product[], users: User[], onClose: () => void, onSubmit: (order: Order) => void }) => {
+const ManualOrderForm = ({ 
+  products, 
+  users, 
+  onClose, 
+  onSubmit 
+}: { 
+  products: Product[], 
+  users: User[], 
+  onClose: () => void, 
+  onSubmit: (order: Order) => void 
+}) => {
+  const [orderMode, setOrderMode] = useState<'REGISTERED' | 'DIRECT_GIFT'>('REGISTERED');
   const [selectedUser, setSelectedUser] = useState<string>('');
-  const [cart, setCart] = useState<{product: Product, quantity: number}[]>([]);
+  
+  // Direct Friend / Gift / Offline Fields
+  const [friendName, setFriendName] = useState<string>('');
+  const [friendMobile, setFriendMobile] = useState<string>('');
+  const [friendAddress, setFriendAddress] = useState<string>('');
+  const [friendOccasion, setFriendOccasion] = useState<string>('Friend / Relative Gift');
+  const [pricingType, setPricingType] = useState<'COMPLIMENTARY' | 'MRP' | 'WHOLESALE' | 'CUSTOM'>('COMPLIMENTARY');
+  const [customDiscountPercent, setCustomDiscountPercent] = useState<number>(100);
+  const [paymentMethod, setPaymentMethod] = useState<Order['paymentMethod']>('Complimentary' as any);
+  const [giftNotes, setGiftNotes] = useState<string>('Special complimentary tea gift dispatched from Superadmin');
+
+  // Cart state
+  const [cart, setCart] = useState<{product: Product, quantity: number, customPrice?: number}[]>([]);
   const [currentProd, setCurrentProd] = useState<string>('');
   const [qty, setQty] = useState(1);
+  const [itemRateOverride, setItemRateOverride] = useState<string>('');
 
   const handleAddItem = () => {
     if(!currentProd) return;
     const prod = products.find(p => p.id === currentProd);
     if(prod) {
-      setCart([...cart, { product: prod, quantity: qty }]);
+      const customPrice = itemRateOverride !== '' ? Number(itemRateOverride) : undefined;
+      setCart([...cart, { product: prod, quantity: qty, customPrice }]);
       setCurrentProd('');
       setQty(1);
+      setItemRateOverride('');
     }
   };
 
-  const calculateTotal = () => {
-    const user = users.find(u => u.id === selectedUser);
-    const isDist = user?.role === 'DISTRIBUTOR';
-    return cart.reduce((acc, item) => acc + ((isDist ? item.product.distributorPrice : item.product.mrp) * item.quantity), 0);
+  const user = users.find(u => u.id === selectedUser);
+  const isDist = orderMode === 'REGISTERED' ? user?.role === 'DISTRIBUTOR' : pricingType === 'WHOLESALE';
+
+  const getItemPrice = (item: {product: Product, quantity: number, customPrice?: number}) => {
+    if (orderMode === 'DIRECT_GIFT') {
+      if (pricingType === 'COMPLIMENTARY') return 0;
+      if (item.customPrice !== undefined) return item.customPrice;
+      if (pricingType === 'WHOLESALE') return item.product.distributorPrice;
+      if (pricingType === 'CUSTOM') {
+        const base = item.product.mrp;
+        return Math.round(base * (1 - (customDiscountPercent / 100)));
+      }
+      return item.product.mrp;
+    }
+    return isDist ? item.product.distributorPrice : item.product.mrp;
   };
 
+  const calculateSubtotal = () => {
+    return cart.reduce((acc, item) => acc + (getItemPrice(item) * item.quantity), 0);
+  };
+
+  const baseSubtotal = calculateSubtotal();
+  const taxAmount = isDist 
+    ? Math.round(baseSubtotal * 0.05 * 100) / 100 
+    : (baseSubtotal > 0 ? Math.round((baseSubtotal - (baseSubtotal / 1.05)) * 100) / 100 : 0);
+  const finalTotal = isDist ? Math.round(baseSubtotal + taxAmount) : Math.round(baseSubtotal);
+
   const handleSubmit = () => {
-    const user = users.find(u => u.id === selectedUser);
-    if (!user || cart.length === 0) return;
+    if (cart.length === 0) {
+      alert("Please add at least one tea product to the invoice.");
+      return;
+    }
 
-    const total = calculateTotal();
-    const taxableBase = total / 1.05;
-    const tax = total - taxableBase;
+    if (orderMode === 'REGISTERED') {
+      if (!user) {
+        alert("Please select a registered customer or distributor.");
+        return;
+      }
+      const order: Order = {
+        id: `ORD-${Date.now()}`,
+        userId: user.id,
+        userName: user.name,
+        userMobile: user.mobile,
+        userAddress: user.address || 'Counter Sale / Store Pickup',
+        items: cart.map(c => ({
+          ...c.product, 
+          quantity: c.quantity,
+          mrp: c.customPrice !== undefined ? c.customPrice : c.product.mrp,
+          distributorPrice: c.customPrice !== undefined ? c.customPrice : c.product.distributorPrice
+        })),
+        totalAmount: finalTotal,
+        taxAmount: taxAmount,
+        status: 'Delivered',
+        paymentMethod: isDist ? 'Bank Transfer' : 'Cash',
+        paymentStatus: 'Paid',
+        date: new Date().toISOString().split('T')[0],
+        type: isDist ? 'WHOLESALE' : 'RETAIL',
+        invoiceNumber: `INV-${Date.now()}`,
+        orderSource: 'MANUAL_OFFLINE',
+        notes: 'Manual offline counter/order created by Superadmin'
+      };
+      onSubmit(order);
+    } else {
+      // DIRECT FRIEND / SAMPLE / GIFT INVOICE
+      if (!friendName.trim()) {
+        alert("Please enter recipient/friend's name.");
+        return;
+      }
 
-    const order: Order = {
-      id: `ORD-${Date.now()}`,
-      userId: user.id,
-      userName: user.name,
-      userMobile: user.mobile,
-      userAddress: user.address || 'Counter Sale',
-      items: cart.map(c => ({...c.product, quantity: c.quantity})),
-      totalAmount: Math.round(total),
-      taxAmount: Math.round(tax * 100) / 100,
-      status: 'Delivered',
-      paymentMethod: 'Cash',
-      paymentStatus: 'Paid',
-      date: new Date().toISOString().split('T')[0],
-      type: user.role === 'DISTRIBUTOR' ? 'WHOLESALE' : 'RETAIL',
-      invoiceNumber: `INV-${Date.now()}`
-    };
-    onSubmit(order);
+      const order: Order = {
+        id: `GIFT-${Date.now()}`,
+        userId: `direct-${Date.now()}`,
+        userName: `${friendName.trim()} (${friendOccasion})`,
+        userMobile: friendMobile.trim() || undefined,
+        userAddress: friendAddress.trim() || 'Direct Handover / Courtesy Dispatch',
+        items: cart.map(c => ({
+          ...c.product, 
+          quantity: c.quantity,
+          mrp: getItemPrice(c),
+          distributorPrice: getItemPrice(c)
+        })),
+        totalAmount: finalTotal,
+        taxAmount: taxAmount,
+        status: 'Delivered',
+        paymentMethod: paymentMethod,
+        paymentStatus: finalTotal === 0 ? 'Paid' : 'Paid',
+        date: new Date().toISOString().split('T')[0],
+        type: pricingType === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL',
+        invoiceNumber: `INV-GIFT-${Date.now().toString().slice(-6)}`,
+        orderSource: 'FRIEND_GIFT',
+        notes: giftNotes || `Complimentary courtesy tea given for: ${friendOccasion}`
+      };
+      onSubmit(order);
+    }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white p-6 rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between mb-4">
-          <h3 className="font-bold text-xl">Create Manual Order</h3>
-          <button onClick={onClose}><XCircle /></button>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto animate-fade-in">
+        <div className="flex justify-between items-center mb-4 border-b pb-3">
+          <div>
+            <h3 className="font-extrabold text-xl text-tea-dark flex items-center gap-2">
+              <Receipt className="text-tea-green" size={22} /> Manual Invoice & Gifting Engine
+            </h3>
+            <p className="text-xs text-gray-500">Create instant invoices for customers, wholesale distributors, or friends/samples without formal order</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition"><XCircle size={24} /></button>
+        </div>
+
+        {/* Mode Selector Tabs */}
+        <div className="flex bg-gray-100 p-1 rounded-xl mb-4 text-xs font-bold">
+          <button
+            type="button"
+            onClick={() => setOrderMode('REGISTERED')}
+            className={`flex-1 py-2.5 rounded-lg flex items-center justify-center gap-2 transition ${
+              orderMode === 'REGISTERED' ? 'bg-white text-tea-dark shadow-sm font-extrabold' : 'text-gray-600 hover:text-black'
+            }`}
+          >
+            <UserIcon size={16} /> Registered Customer / Distributor
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOrderMode('DIRECT_GIFT');
+              setPricingType('COMPLIMENTARY');
+              setPaymentMethod('Complimentary' as any);
+            }}
+            className={`flex-1 py-2.5 rounded-lg flex items-center justify-center gap-2 transition ${
+              orderMode === 'DIRECT_GIFT' ? 'bg-white text-tea-gold shadow-sm font-extrabold' : 'text-gray-600 hover:text-black'
+            }`}
+          >
+            <Gift size={16} /> Friend / Gift / Sample (Without Order)
+          </button>
         </div>
         
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-bold mb-1">Select Customer</label>
-            <select className="w-full border p-2 rounded" value={selectedUser} onChange={e => setSelectedUser(e.target.value)}>
-              <option value="">-- Select User --</option>
-              {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
-            </select>
-          </div>
-
-          <div className="bg-gray-50 p-4 rounded border">
-            <h4 className="font-bold text-sm mb-2">Add Items</h4>
-            <div className="flex gap-2">
-              <select className="flex-1 border p-2 rounded" value={currentProd} onChange={e => setCurrentProd(e.target.value)}>
-                <option value="">Select Product</option>
-                {products.map(p => <option key={p.id} value={p.id}>{p.name} (Stk: {p.stock})</option>)}
+          {orderMode === 'REGISTERED' ? (
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1">Select Customer / Distributor</label>
+              <select className="w-full border p-2.5 rounded-lg text-sm bg-white" value={selectedUser} onChange={e => setSelectedUser(e.target.value)}>
+                <option value="">-- Select Customer / Distributor --</option>
+                {users.map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.role}) - {u.mobile || 'No mobile'}
+                  </option>
+                ))}
               </select>
-              <input type="number" className="w-20 border p-2 rounded" min="1" value={qty} onChange={e => setQty(parseInt(e.target.value))} />
-              <button onClick={handleAddItem} className="bg-tea-dark text-white px-4 rounded">Add</button>
+              {user && (
+                <div className="mt-2 text-xs flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded font-bold ${isDist ? 'bg-purple-100 text-purple-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                    {isDist ? 'Wholesale Account (GST Exclusive +5%)' : 'Retail Customer (GST Included in MRP)'}
+                  </span>
+                  {user.gstNumber && <span className="text-gray-600 font-mono">GST: {user.gstNumber}</span>}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-900 flex items-center gap-1.5">
+                  <Gift size={15} /> Friend / Direct Sample Gifting Details
+                </span>
+                <span className="text-[11px] bg-amber-200/60 text-amber-900 px-2 py-0.5 rounded font-semibold">Superadmin Special</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Recipient / Friend Name *</label>
+                  <input 
+                    className="w-full border p-2 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-amber-500" 
+                    placeholder="e.g. Ramesh Sharma (Friend / Relative)" 
+                    value={friendName} 
+                    onChange={e => setFriendName(e.target.value)} 
+                    required 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Contact Mobile Number</label>
+                  <input 
+                    className="w-full border p-2 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-amber-500" 
+                    placeholder="e.g. 9876543210" 
+                    value={friendMobile} 
+                    onChange={e => setFriendMobile(e.target.value)} 
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Occasion / Purpose</label>
+                  <select 
+                    className="w-full border p-2 rounded-lg text-sm bg-white" 
+                    value={friendOccasion} 
+                    onChange={e => setFriendOccasion(e.target.value)}
+                  >
+                    <option value="Friend / Relative Gift">🎁 Friend / Relative Gift</option>
+                    <option value="Promotional Tasting Sample">☕ Promotional Tasting Sample</option>
+                    <option value="Direct Walk-in / Counter Sale">🏪 Direct Walk-in / Counter Sale</option>
+                    <option value="Corporate Trial / Tasting">🏢 Corporate Trial / Tasting</option>
+                    <option value="VIP Courtesy Pack">👑 VIP Courtesy Pack</option>
+                    <option value="Exhibition / Event Sample">🎪 Exhibition / Event Sample</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Pricing Scheme</label>
+                  <select 
+                    className="w-full border p-2 rounded-lg text-sm bg-white font-bold" 
+                    value={pricingType} 
+                    onChange={e => {
+                      const val = e.target.value as any;
+                      setPricingType(val);
+                      if (val === 'COMPLIMENTARY') {
+                        setPaymentMethod('Complimentary' as any);
+                      } else if (val === 'MRP' || val === 'WHOLESALE') {
+                        setPaymentMethod('Cash');
+                      }
+                    }}
+                  >
+                    <option value="COMPLIMENTARY">🎉 100% Free / Complimentary (₹0)</option>
+                    <option value="MRP">🏷️ Standard Retail MRP (GST Included)</option>
+                    <option value="WHOLESALE">📦 Wholesale Rate (GST +5% Added)</option>
+                    <option value="CUSTOM">⚡ Custom Discount Percentage</option>
+                  </select>
+                </div>
+              </div>
+
+              {pricingType === 'CUSTOM' && (
+                <div className="bg-white p-2.5 rounded-lg border flex items-center justify-between gap-3">
+                  <span className="text-xs text-gray-700 font-bold">Discount on MRP (%):</span>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="number" 
+                      min="0" 
+                      max="100" 
+                      className="w-20 border p-1 text-center font-bold text-sm rounded" 
+                      value={customDiscountPercent} 
+                      onChange={e => setCustomDiscountPercent(Number(e.target.value) || 0)} 
+                    />
+                    <span className="text-xs font-bold">% OFF</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Delivery / Handover Address</label>
+                  <input 
+                    className="w-full border p-2 rounded-lg text-sm bg-white outline-none" 
+                    placeholder="e.g. Vashi Sector 17, Navi Mumbai / Hand Delivered" 
+                    value={friendAddress} 
+                    onChange={e => setFriendAddress(e.target.value)} 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Payment Method / Status</label>
+                  <select 
+                    className="w-full border p-2 rounded-lg text-sm bg-white" 
+                    value={paymentMethod} 
+                    onChange={e => setPaymentMethod(e.target.value as any)}
+                  >
+                    <option value="Complimentary">Complimentary / Free Gift (No Payment)</option>
+                    <option value="Cash">Cash on Counter</option>
+                    <option value="UPI">UPI / GooglePay / PhonePe</option>
+                    <option value="Card">Credit / Debit Card</option>
+                    <option value="Waived">Waived by Superadmin</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Invoice Notes / Message</label>
+                <input 
+                  className="w-full border p-2 rounded-lg text-xs bg-white" 
+                  placeholder="e.g. Enjoy the rich aroma of Amrit Assam Gold Tea. Best wishes from our family." 
+                  value={giftNotes} 
+                  onChange={e => setGiftNotes(e.target.value)} 
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Add Products Section */}
+          <div className="bg-gray-50 p-4 rounded-xl border">
+            <h4 className="font-bold text-xs uppercase tracking-wider text-gray-600 mb-2">Add Tea Products</h4>
+            <div className="flex flex-wrap gap-2 items-end">
+              <div className="flex-1 min-w-[200px]">
+                <select className="w-full border p-2.5 rounded-lg text-sm bg-white" value={currentProd} onChange={e => setCurrentProd(e.target.value)}>
+                  <option value="">Select Product</option>
+                  {products.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.weight}) - Stk: {p.stock} | MRP: ₹{p.mrp} {isDist ? `| Wholesale: ₹${p.distributorPrice}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="w-20">
+                <label className="text-[10px] text-gray-500 font-bold block mb-0.5">Quantity</label>
+                <input type="number" className="w-full border p-2 rounded-lg text-sm text-center" min="1" value={qty} onChange={e => setQty(parseInt(e.target.value) || 1)} />
+              </div>
+              {orderMode === 'DIRECT_GIFT' && pricingType !== 'COMPLIMENTARY' && (
+                <div className="w-24">
+                  <label className="text-[10px] text-gray-500 font-bold block mb-0.5">Rate (₹/Unit)</label>
+                  <input type="number" className="w-full border p-2 rounded-lg text-sm text-center" placeholder="Auto" value={itemRateOverride} onChange={e => setItemRateOverride(e.target.value)} />
+                </div>
+              )}
+              <button onClick={handleAddItem} className="bg-tea-dark text-white px-5 py-2.5 rounded-lg text-sm font-bold hover:bg-black transition">
+                Add
+              </button>
             </div>
           </div>
 
+          {/* Items Table */}
           <div>
-             <table className="w-full text-sm">
-               <thead><tr className="border-b"><th className="text-left">Item</th><th className="text-right">Qty</th><th className="text-right">Price</th></tr></thead>
-               <tbody>
-                 {cart.map((item, idx) => {
-                   const user = users.find(u => u.id === selectedUser);
-                   const price = user?.role === 'DISTRIBUTOR' ? item.product.distributorPrice : item.product.mrp;
-                   return (
-                    <tr key={idx} className="border-b">
-                      <td>{item.product.name}</td>
-                      <td className="text-right">{item.quantity}</td>
-                      <td className="text-right">₹{price * item.quantity}</td>
-                    </tr>
-                   );
-                 })}
+             <table className="w-full text-xs border rounded-lg overflow-hidden">
+               <thead className="bg-gray-100 border-b text-gray-700">
+                 <tr>
+                   <th className="text-left p-2.5">Item</th>
+                   <th className="text-center p-2.5">Qty</th>
+                   <th className="text-right p-2.5">Rate (₹)</th>
+                   <th className="text-right p-2.5">Total (₹)</th>
+                   <th className="p-2.5 text-center"></th>
+                 </tr>
+               </thead>
+               <tbody className="divide-y">
+                 {cart.length === 0 ? (
+                   <tr><td colSpan={5} className="p-4 text-center text-gray-400">No items added to invoice yet</td></tr>
+                 ) : (
+                   cart.map((item, idx) => {
+                     const price = getItemPrice(item);
+                     return (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="p-2.5 font-medium">{item.product.name} <span className="text-gray-400">({item.product.weight})</span></td>
+                        <td className="text-center p-2.5 font-bold">{item.quantity}</td>
+                        <td className="text-right p-2.5 font-mono">
+                          {price === 0 ? <span className="text-green-700 font-bold">FREE (₹0)</span> : `₹${price}`}
+                        </td>
+                        <td className="text-right p-2.5 font-mono font-bold">
+                          {price === 0 ? <span className="text-green-700 font-bold">₹0</span> : `₹${price * item.quantity}`}
+                        </td>
+                        <td className="text-center p-2.5">
+                          <button onClick={() => setCart(cart.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-700">
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                     );
+                   })
+                 )}
                </tbody>
              </table>
-             <div className="text-right font-bold text-base mt-2 text-tea-dark">
-               Total (MRP Incl. 5% GST): ₹{calculateTotal().toLocaleString()}
-             </div>
+
+             {cart.length > 0 && (
+               <div className="mt-3 p-3 bg-gray-50 rounded-lg border text-xs space-y-1">
+                 <div className="flex justify-between text-gray-600">
+                   <span>Base Taxable Subtotal:</span>
+                   <span className="font-mono font-medium">₹{baseSubtotal.toFixed(2)}</span>
+                 </div>
+                 <div className="flex justify-between text-gray-600">
+                   <span>{isDist ? '5% GST (Added Extra for Wholesale):' : 'Included 5% GST (CGST 2.5% + SGST 2.5%):'}</span>
+                   <span className="font-mono font-medium">{isDist ? `+ ₹${taxAmount.toFixed(2)}` : `₹${taxAmount.toFixed(2)}`}</span>
+                 </div>
+                 <div className="flex justify-between font-black text-sm text-tea-dark pt-1 border-t">
+                   <span>Final Order / Bill Total:</span>
+                   <span className="font-mono text-base">
+                     {finalTotal === 0 ? <span className="text-green-700 font-black">₹0.00 (Complimentary)</span> : `₹${finalTotal.toLocaleString()}`}
+                   </span>
+                 </div>
+               </div>
+             )}
           </div>
 
-          <button onClick={handleSubmit} className="w-full bg-green-600 text-white font-bold py-3 rounded hover:bg-green-700">
-            Create Order & Invoice
+          <button 
+            onClick={handleSubmit} 
+            disabled={cart.length === 0 || (orderMode === 'REGISTERED' && !selectedUser) || (orderMode === 'DIRECT_GIFT' && !friendName.trim())} 
+            className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl shadow transition flex items-center justify-center gap-2 text-sm"
+          >
+            <CheckCircle size={18} /> Generate Tax Invoice & Save Record
           </button>
         </div>
+      </div>
+    </div>
+  );
+};
+
+// --- LIVE TRACKING MODAL ---
+const COURIER_PRESETS = [
+  { name: 'Delhivery', url: (awb: string) => `https://www.delhivery.com/track/package/${awb}` },
+  { name: 'Blue Dart', url: (awb: string) => `https://www.bluedart.com/tracking?trackNumber=${awb}` },
+  { name: 'DTDC', url: (awb: string) => `https://www.dtdc.in/tracking/tracking_results.asp?Ttype=awb_no&strCnno=${awb}` },
+  { name: 'India Post Speed Post', url: (awb: string) => `https://www.indiapost.gov.in/_layouts/15/dop.portal.tracking/trackconsignment.aspx` },
+  { name: 'Shiprocket', url: (awb: string) => `https://shiprocket.co/tracking/${awb}` },
+  { name: 'Ekart Logistics', url: (awb: string) => `https://ekartlogistics.com/shipmenttrack/${awb}` },
+  { name: 'Trackon', url: (awb: string) => `https://trackon.in/Tracking/MultipleTracking?awb=${awb}` },
+  { name: 'Xpressbees', url: (awb: string) => `https://www.xpressbees.com/track?isawb=Yes&trackid=${awb}` },
+  { name: 'Shadowfax', url: (awb: string) => `https://tracker.shadowfax.in/track?orderId=${awb}` },
+  { name: 'Ecom Express', url: (awb: string) => `https://ecomexpress.in/tracking/?awb_field=${awb}` },
+  { name: 'Custom Courier', url: (awb: string) => '' }
+];
+
+const LiveTrackingModal = ({
+  order,
+  isAdmin = false,
+  onClose,
+  onUpdateTracking,
+  onUpdateStatus
+}: {
+  order: Order;
+  isAdmin?: boolean;
+  onClose: () => void;
+  onUpdateTracking?: (orderId: string, trackingNumber: string, courierName: string, trackingUrl?: string) => void;
+  onUpdateStatus?: (orderId: string, status: Order['status'], trackingNumber?: string, courierName?: string, customNote?: string, trackingUrl?: string) => void;
+}) => {
+  const [courierName, setCourierName] = useState(order.courierName || 'Delhivery');
+  const [trackingNumber, setTrackingNumber] = useState(order.trackingNumber || '');
+  const [trackingUrl, setTrackingUrl] = useState(order.trackingUrl || '');
+  const [orderStatus, setOrderStatus] = useState<Order['status']>(order.status || 'Shipped');
+  const [customNote, setCustomNote] = useState(order.notes || '');
+  const [copied, setCopied] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Auto-fill tracking URL when courier or trackingNumber changes
+  const handleCourierChange = (newCourier: string) => {
+    setCourierName(newCourier);
+    const preset = COURIER_PRESETS.find(p => p.name === newCourier);
+    if (preset && trackingNumber) {
+      setTrackingUrl(preset.url(trackingNumber));
+    }
+  };
+
+  const handleTrackingNumberChange = (newAwb: string) => {
+    setTrackingNumber(newAwb);
+    const preset = COURIER_PRESETS.find(p => p.name === courierName);
+    if (preset && preset.name !== 'Custom Courier') {
+      setTrackingUrl(preset.url(newAwb));
+    }
+  };
+
+  const handleCopyAwb = () => {
+    if (!trackingNumber) return;
+    navigator.clipboard.writeText(trackingNumber);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSaveTracking = () => {
+    if (!trackingNumber.trim()) {
+      alert("Please enter a valid AWB Tracking Number / Consignment ID.");
+      return;
+    }
+    setIsSaving(true);
+    if (onUpdateStatus) {
+      onUpdateStatus(order.id, orderStatus, trackingNumber.trim(), courierName, customNote, trackingUrl.trim());
+    } else if (onUpdateTracking) {
+      onUpdateTracking(order.id, trackingNumber.trim(), courierName, trackingUrl.trim());
+    }
+    setIsSaving(false);
+    alert(`Tracking details updated for ${order.id}!\nCourier: ${courierName}\nAWB: ${trackingNumber}\nSMS Notification triggered.`);
+    onClose();
+  };
+
+  // Determine active step in live tracking
+  const currentStep = 
+    order.status === 'Delivered' ? 4 :
+    order.status === 'Shipped' || order.trackingNumber ? 3 :
+    order.status === 'Processing' ? 2 : 1;
+
+  const trackingLink = trackingUrl || (trackingNumber ? (COURIER_PRESETS.find(p => p.name === courierName)?.url(trackingNumber) || `https://www.google.com/search?q=${encodeURIComponent(courierName + ' tracking ' + trackingNumber)}`) : '');
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-fade-in">
+        {/* Header */}
+        <div className="p-5 bg-gradient-to-r from-tea-dark via-tea-green to-tea-dark text-white flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="bg-white/20 p-2.5 rounded-xl backdrop-blur-sm">
+              <Truck size={24} className="text-tea-gold" />
+            </div>
+            <div>
+              <h3 className="font-extrabold text-lg flex items-center gap-2">
+                Live Shipment Tracking
+                <span className="text-xs bg-white/20 px-2.5 py-0.5 rounded-full font-mono text-tea-gold font-bold">
+                  {order.invoiceNumber || order.id}
+                </span>
+              </h3>
+              <p className="text-xs text-gray-200">Real-time package status & courier consignment tracker</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-300 hover:text-white transition">
+            <XCircle size={26} />
+          </button>
+        </div>
+
+        <div className="p-6 overflow-y-auto space-y-6 flex-1">
+          {/* Visual Step-by-Step Tracker */}
+          <div className="bg-gray-50 border rounded-xl p-5">
+            <h4 className="text-xs font-extrabold uppercase tracking-wider text-gray-500 mb-4">Delivery Progress Timeline</h4>
+            <div className="relative flex items-center justify-between">
+              {/* Connector line */}
+              <div className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-gray-200 w-full z-0" />
+              <div 
+                className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-tea-green transition-all duration-500 z-0" 
+                style={{ width: currentStep === 4 ? '100%' : currentStep === 3 ? '66%' : currentStep === 2 ? '33%' : '0%' }}
+              />
+
+              {/* Steps */}
+              {[
+                { step: 1, label: 'Placed', desc: order.date, icon: Check },
+                { step: 2, label: 'Packed', desc: 'Ready at Hub', icon: Package },
+                { step: 3, label: 'Shipped', desc: courierName || 'Courier', icon: Truck },
+                { step: 4, label: 'Delivered', desc: order.status === 'Delivered' ? 'Completed' : 'Expected soon', icon: CheckCheck }
+              ].map(s => {
+                const isCompleted = currentStep >= s.step;
+                const isCurrent = currentStep === s.step;
+                const Icon = s.icon;
+                return (
+                  <div key={s.step} className="flex flex-col items-center relative z-10">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${
+                      isCompleted ? 'bg-tea-dark border-tea-dark text-white shadow-md' : 'bg-white border-gray-300 text-gray-400'
+                    } ${isCurrent ? 'ring-4 ring-tea-green/30 scale-110' : ''}`}>
+                      <Icon size={18} />
+                    </div>
+                    <span className={`text-xs font-bold mt-2 ${isCompleted ? 'text-tea-dark' : 'text-gray-400'}`}>{s.label}</span>
+                    <span className="text-[10px] text-gray-500 font-medium max-w-[80px] text-center truncate">{s.desc}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Courier & Live Tracking Info Card */}
+          <div className="bg-gradient-to-br from-tea-green/5 to-tea-gold/10 border border-tea-green/30 rounded-xl p-5 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-tea-green/20 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="bg-white p-2 rounded-lg border shadow-sm">
+                  <Package className="text-tea-dark" size={24} />
+                </div>
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-500 block">Delivery Partner</span>
+                  <span className="font-extrabold text-base text-tea-dark">{order.courierName || courierName || 'Express Logistics Hub'}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className={`px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider ${
+                  order.status === 'Delivered' ? 'bg-green-100 text-green-800 border border-green-300' :
+                  order.status === 'Shipped' ? 'bg-blue-100 text-blue-800 border border-blue-300' :
+                  'bg-amber-100 text-amber-800 border border-amber-300'
+                }`}>
+                  {order.status}
+                </span>
+              </div>
+            </div>
+
+            {/* AWB Tracking Code Box */}
+            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">AWB Consignment / Tracking Number</span>
+                <span className="font-mono font-black text-lg text-gray-900 tracking-wide">
+                  {order.trackingNumber || trackingNumber || 'Pending Dispatch / In Hub'}
+                </span>
+              </div>
+
+              {(order.trackingNumber || trackingNumber) && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleCopyAwb}
+                    className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 border"
+                    title="Copy AWB Tracking Number"
+                  >
+                    {copied ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
+                    {copied ? 'Copied!' : 'Copy AWB'}
+                  </button>
+
+                  {trackingLink && (
+                    <a
+                      href={trackingLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="bg-tea-dark hover:bg-black text-white px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow"
+                    >
+                      <ExternalLink size={14} /> Track on Portal
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Delivery Recipient Info */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-gray-700">
+              <div className="bg-white/80 p-3 rounded-lg border">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Recipient</span>
+                <span className="font-bold text-gray-900">{order.userName}</span>
+                {order.userMobile && <span className="block text-gray-600 font-mono mt-0.5">📞 {order.userMobile}</span>}
+              </div>
+
+              <div className="bg-white/80 p-3 rounded-lg border">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Delivery Destination</span>
+                <span className="font-medium text-gray-800 line-clamp-2">{order.userAddress || 'Address on Invoice'}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Admin Shipping Update Panel */}
+          {isAdmin && (
+            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between border-b border-amber-200 pb-2">
+                <h4 className="font-extrabold text-sm text-amber-900 flex items-center gap-2">
+                  <Edit size={16} /> Admin: Update Shipping & Dispatch Details
+                </h4>
+                <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded font-bold">Admin Only</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Courier / Logistics Partner</label>
+                  <select
+                    className="w-full border p-2 rounded-lg text-xs bg-white font-medium"
+                    value={courierName}
+                    onChange={e => handleCourierChange(e.target.value)}
+                  >
+                    {COURIER_PRESETS.map(c => (
+                      <option key={c.name} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">AWB Consignment Number *</label>
+                  <input
+                    type="text"
+                    className="w-full border p-2 rounded-lg text-xs font-mono font-bold bg-white"
+                    placeholder="e.g. DL1234567890IN"
+                    value={trackingNumber}
+                    onChange={e => handleTrackingNumberChange(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Live Tracking URL</label>
+                  <input
+                    type="url"
+                    className="w-full border p-2 rounded-lg text-xs font-mono bg-white"
+                    placeholder="https://..."
+                    value={trackingUrl}
+                    onChange={e => setTrackingUrl(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Update Order Status</label>
+                  <select
+                    className="w-full border p-2 rounded-lg text-xs font-bold bg-white"
+                    value={orderStatus}
+                    onChange={e => setOrderStatus(e.target.value as any)}
+                  >
+                    <option value="Processing">Processing (Packaging at Hub)</option>
+                    <option value="Shipped">Shipped (Handed over to Courier)</option>
+                    <option value="Delivered">Delivered (Successfully Received)</option>
+                    <option value="Cancelled">Cancelled</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Dispatch / Courier Notes</label>
+                <input
+                  type="text"
+                  className="w-full border p-2 rounded-lg text-xs bg-white"
+                  placeholder="e.g. Dispatched from APMC Vashi Depot via Express Cargo"
+                  value={customNote}
+                  onChange={e => setCustomNote(e.target.value)}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleSaveTracking}
+                  disabled={isSaving}
+                  className="bg-tea-dark hover:bg-black text-white px-5 py-2.5 rounded-lg text-xs font-bold shadow flex items-center gap-2 transition"
+                >
+                  <Save size={16} /> {isSaving ? 'Saving...' : 'Save & Dispatch Tracking SMS'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* WhatsApp Support Share Button */}
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs bg-gray-50 p-4 rounded-xl border">
+            <div className="text-gray-600">
+              <span className="font-bold text-gray-800 block">Need assistance with your delivery?</span>
+              <span>Our logistics team is available on WhatsApp Mon–Sat (9 AM – 7 PM).</span>
+            </div>
+            <a
+              href={`https://wa.me/919876543210?text=${encodeURIComponent(`Hi Amrit Assam Tea support, please provide an update on my order ID ${order.invoiceNumber || order.id} (Tracking AWB: ${order.trackingNumber || trackingNumber || 'N/A'}).`)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 transition shadow-sm"
+            >
+              <MessageSquare size={16} /> WhatsApp Support
+            </a>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t bg-gray-50 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 border border-gray-300 rounded-lg text-xs font-bold text-gray-700 hover:bg-gray-100"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- EXPENSE RECORD FORM MODAL ---
+const EXPENSE_CATEGORIES = [
+  'Rent & Premises',
+  'Packaging & Materials',
+  'Logistics & Freight',
+  'Utilities & Electricity',
+  'Marketing & Promotion',
+  'Sampling & Tasting',
+  'Salaries & Wages',
+  'Office & Stationery',
+  'Legal & Compliance',
+  'Miscellaneous Expenses'
+];
+
+const ExpenseRecordForm = ({
+  expense,
+  onClose,
+  onSubmit
+}: {
+  expense?: ExpenseRecord | null;
+  onClose: () => void;
+  onSubmit: (exp: ExpenseRecord) => void;
+}) => {
+  const [title, setTitle] = useState(expense?.title || '');
+  const [category, setCategory] = useState(expense?.category || 'Miscellaneous Expenses');
+  const [amount, setAmount] = useState(expense?.amount?.toString() || '');
+  const [date, setDate] = useState(expense?.date || new Date().toISOString().split('T')[0]);
+  const [paidTo, setPaidTo] = useState(expense?.paidTo || '');
+  const [paymentMethod, setPaymentMethod] = useState(expense?.paymentMethod || 'UPI');
+  const [billRefNumber, setBillRefNumber] = useState(expense?.billRefNumber || '');
+  const [billUrl, setBillUrl] = useState(expense?.billUrl || '');
+  const [billFileName, setBillFileName] = useState('');
+  const [notes, setNotes] = useState(expense?.notes || '');
+  const [status, setStatus] = useState<ExpenseRecord['status']>(expense?.status || 'Paid');
+  const [expenseNumber] = useState(expense?.expenseNumber || `EXP-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`);
+
+  const handleBillUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        alert("File size exceeds 5MB limit. Please upload a smaller receipt or document.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setBillUrl(reader.result as string);
+        setBillFileName(file.name);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || !amount || Number(amount) <= 0) {
+      alert("Please provide a valid Expense Title and Amount.");
+      return;
+    }
+
+    const rec: ExpenseRecord = {
+      id: expense?.id || `exp-${Date.now()}`,
+      expenseNumber,
+      title: title.trim(),
+      category,
+      amount: Number(amount),
+      date,
+      paidTo: paidTo.trim() || 'Direct Expense',
+      paymentMethod,
+      billRefNumber: billRefNumber.trim() || undefined,
+      billUrl: billUrl || undefined,
+      notes: notes.trim() || undefined,
+      status,
+      createdBy: 'Super Admin'
+    };
+
+    onSubmit(rec);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-white p-6 rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl animate-fade-in">
+        <div className="flex justify-between items-center mb-5 border-b pb-3">
+          <div>
+            <h3 className="font-extrabold text-xl text-tea-dark flex items-center gap-2">
+              <Wallet className="text-tea-green" size={22} /> {expense ? 'Edit Miscellaneous Expense' : 'Record Miscellaneous Expense'}
+            </h3>
+            <p className="text-xs text-gray-500">Track all operational expenses, vendor payments, and attached bills</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition"><XCircle size={24} /></button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">Expense Title / Description *</label>
+              <input 
+                className="w-full border p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-tea-green" 
+                placeholder="e.g. Warehouse Monthly Rent, Tea Pouch Printing" 
+                value={title} 
+                onChange={e => setTitle(e.target.value)} 
+                required 
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">Expense Category *</label>
+              <select 
+                className="w-full border p-2.5 rounded-lg text-sm bg-white font-medium outline-none focus:ring-2 focus:ring-tea-green" 
+                value={category} 
+                onChange={e => setCategory(e.target.value)}
+              >
+                {EXPENSE_CATEGORIES.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">Amount (₹) *</label>
+              <input 
+                type="number" 
+                min="1" 
+                className="w-full border p-2.5 rounded-lg text-sm font-mono font-bold outline-none focus:ring-2 focus:ring-tea-green" 
+                placeholder="e.g. 15000" 
+                value={amount} 
+                onChange={e => setAmount(e.target.value)} 
+                required 
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">Expense Date *</label>
+              <input 
+                type="date" 
+                className="w-full border p-2.5 rounded-lg text-sm bg-white outline-none" 
+                value={date} 
+                onChange={e => setDate(e.target.value)} 
+                required 
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">Expense Reference No.</label>
+              <input 
+                type="text" 
+                className="w-full border p-2.5 rounded-lg text-sm font-mono bg-gray-50 text-gray-600 font-bold" 
+                value={expenseNumber} 
+                readOnly 
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">Paid To / Vendor Name</label>
+              <input 
+                className="w-full border p-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-tea-green" 
+                placeholder="e.g. APMC Logistics / Shree Packaging" 
+                value={paidTo} 
+                onChange={e => setPaidTo(e.target.value)} 
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">Payment Method</label>
+              <select 
+                className="w-full border p-2.5 rounded-lg text-sm bg-white" 
+                value={paymentMethod} 
+                onChange={e => setPaymentMethod(e.target.value)}
+              >
+                <option value="UPI">UPI (GPay / PhonePe / Paytm)</option>
+                <option value="Bank Transfer">Bank Transfer (NEFT / RTGS / IMPS)</option>
+                <option value="Cash">Cash Voucher</option>
+                <option value="Cheque">Cheque</option>
+                <option value="Credit Card">Credit / Debit Card</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">Bill / Invoice Ref No.</label>
+              <input 
+                className="w-full border p-2.5 rounded-lg text-sm font-mono" 
+                placeholder="e.g. INV-2026/894" 
+                value={billRefNumber} 
+                onChange={e => setBillRefNumber(e.target.value)} 
+              />
+            </div>
+          </div>
+
+          {/* Bill Attachment Document Upload */}
+          <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 bg-gray-50 hover:bg-gray-100 transition">
+            <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center justify-between">
+              <span className="flex items-center gap-1.5"><UploadCloud size={16} className="text-tea-dark" /> Attach Bill / Cash Receipt Document</span>
+              <span className="text-[11px] text-gray-400 font-normal">JPG, PNG, PDF (Max 5MB)</span>
+            </label>
+            <input 
+              type="file" 
+              accept="image/*,.pdf" 
+              onChange={handleBillUpload} 
+              className="block w-full text-xs text-gray-500 file:mr-4 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-tea-dark file:text-white hover:file:bg-black cursor-pointer" 
+            />
+            {billUrl && (
+              <div className="mt-2 flex items-center justify-between text-xs bg-green-50 border border-green-200 text-green-800 p-2.5 rounded-lg">
+                <span className="font-medium truncate flex items-center gap-1.5">
+                  <FileCheck size={16} className="text-green-600" /> Attached Bill: {billFileName || 'Receipt_Document'}
+                </span>
+                <button 
+                  type="button" 
+                  onClick={() => { setBillUrl(''); setBillFileName(''); }} 
+                  className="text-red-600 hover:underline text-[11px] font-bold"
+                >
+                  Remove
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">Status</label>
+              <select 
+                className="w-full border p-2.5 rounded-lg text-sm bg-white font-bold" 
+                value={status} 
+                onChange={e => setStatus(e.target.value as any)}
+              >
+                <option value="Paid">Paid</option>
+                <option value="Pending">Pending Payment</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">Notes / Narration</label>
+              <input 
+                className="w-full border p-2.5 rounded-lg text-sm" 
+                placeholder="Additional notes about this expenditure..." 
+                value={notes} 
+                onChange={e => setNotes(e.target.value)} 
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3 border-t">
+            <button type="button" onClick={onClose} className="px-5 py-2.5 border rounded-lg text-xs font-bold text-gray-600 hover:bg-gray-50">
+              Cancel
+            </button>
+            <button type="submit" className="bg-tea-dark hover:bg-black text-white px-6 py-2.5 rounded-lg text-xs font-bold shadow flex items-center gap-2 transition">
+              <CheckCircle size={16} /> Save Expense Record
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
@@ -1011,14 +2090,241 @@ const CouponFormModal = ({
   );
 };
 
+const SendOrderSMSModal = ({ 
+  order, 
+  onClose, 
+  onSend 
+}: { 
+  order: Order; 
+  onClose: () => void; 
+  onSend: (orderId: string, mobile: string, name: string, stage: any, message: string, tracking?: string, courier?: string) => Promise<boolean>;
+}) => {
+  const [selectedStage, setSelectedStage] = useState<'Order Placed' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled' | 'Custom'>('Processing');
+  const [mobile, setMobile] = useState(order.userMobile || '');
+  const [name, setName] = useState(order.userName || 'Valued Customer');
+  const [courierName, setCourierName] = useState(order.courierName || 'Delhivery Express');
+  const [trackingNumber, setTrackingNumber] = useState(order.trackingNumber || '');
+  const [customMsg, setCustomMsg] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const getTemplate = (stage: string) => {
+    switch (stage) {
+      case 'Order Placed':
+        return `Namaste ${name}! Your order ${order.id} for Amrit Assam Gold Tea (Rs.${order.totalAmount}) is placed successfully. Payment: ${order.paymentStatus}. Thank you for choosing us!`;
+      case 'Processing':
+        return `Dear ${name}, your order ${order.id} is being fresh-packed at Amrit Assam Gold Tea hub. We will dispatch it shortly.`;
+      case 'Shipped':
+        return `Dear ${name}, your order ${order.id} has been SHIPPED via ${courierName || 'our courier'}.${trackingNumber ? ` Tracking AWB: ${trackingNumber}.` : ''} Expected delivery in 3-5 days.`;
+      case 'Delivered':
+        return `Dear ${name}, your Amrit Assam Gold Tea order ${order.id} has been DELIVERED! Enjoy the premium blend. Contact support@amritassam.com for queries.`;
+      case 'Cancelled':
+        return `Dear ${name}, your order ${order.id} has been CANCELLED.${order.paymentStatus === 'Refunded' ? ' Refund has been processed to your source account.' : ''} Need assistance? Contact Amrit Assam team.`;
+      default:
+        return customMsg || `Dear ${name}, update regarding your order ${order.id} from Amrit Assam Gold Tea.`;
+    }
+  };
+
+  const messageToSend = selectedStage === 'Custom' ? customMsg : getTemplate(selectedStage);
+
+  const handleSend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mobile.trim()) {
+      alert("Please enter recipient mobile number");
+      return;
+    }
+    if (!messageToSend.trim()) {
+      alert("Message content cannot be empty");
+      return;
+    }
+
+    setIsSending(true);
+    setStatusMsg(null);
+    try {
+      const ok = await onSend(order.id, mobile.trim(), name.trim(), selectedStage, messageToSend.trim(), trackingNumber, courierName);
+      if (ok) {
+        setStatusMsg({ type: 'success', text: `SMS Alert dispatched to ${mobile} successfully!` });
+        setTimeout(() => {
+          onClose();
+        }, 1500);
+      } else {
+        setStatusMsg({ type: 'error', text: 'Failed to dispatch SMS. Check gateway configuration.' });
+      }
+    } catch (err: any) {
+      setStatusMsg({ type: 'error', text: err.message || 'Error dispatching SMS' });
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+      <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-gray-100 max-h-[92vh] overflow-y-auto">
+        <div className="flex justify-between items-center pb-4 border-b border-gray-100">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-blue-100 rounded-xl text-blue-700">
+              <MessageSquare size={20} />
+            </div>
+            <div>
+              <h3 className="font-bold text-lg text-gray-900">Send SMS Notification</h3>
+              <p className="text-xs text-gray-500">Order: <span className="font-mono font-bold text-tea-dark">{order.id}</span></p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-100 transition">
+            <X size={18} />
+          </button>
+        </div>
+
+        {statusMsg && (
+          <div className={`mt-4 p-3 rounded-lg text-xs font-bold flex items-center gap-2 ${
+            statusMsg.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'
+          }`}>
+            {statusMsg.type === 'success' ? <CheckCircle size={16} /> : <AlertTriangle size={16} />}
+            <span>{statusMsg.text}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSend} className="space-y-4 mt-4 text-xs">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-bold text-gray-700 mb-1">Customer Mobile</label>
+              <input 
+                type="tel"
+                required
+                className="w-full border rounded-lg p-2.5 font-mono text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="e.g. 9876543210"
+                value={mobile}
+                onChange={e => setMobile(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block font-bold text-gray-700 mb-1">Recipient Name</label>
+              <input 
+                type="text"
+                required
+                className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                value={name}
+                onChange={e => setName(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-bold text-gray-700 mb-1.5">Select Order Stage / Event</label>
+            <div className="grid grid-cols-3 gap-1.5">
+              {(['Order Placed', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Custom'] as const).map(stage => (
+                <button
+                  type="button"
+                  key={stage}
+                  onClick={() => setSelectedStage(stage)}
+                  className={`p-2 rounded-lg font-bold border text-center transition ${
+                    selectedStage === stage 
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs' 
+                      : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                  }`}
+                >
+                  {stage}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {selectedStage === 'Shipped' && (
+            <div className="grid grid-cols-2 gap-3 bg-blue-50/50 p-3 rounded-lg border border-blue-100">
+              <div>
+                <label className="block font-bold text-blue-900 mb-1">Courier Partner</label>
+                <input 
+                  type="text"
+                  className="w-full border bg-white rounded-lg p-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="e.g. Delhivery / Blue Dart"
+                  value={courierName}
+                  onChange={e => setCourierName(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-blue-900 mb-1">AWB / Tracking Number</label>
+                <input 
+                  type="text"
+                  className="w-full border bg-white rounded-lg p-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="e.g. DEL7823901"
+                  value={trackingNumber}
+                  onChange={e => setTrackingNumber(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <label className="font-bold text-gray-700">SMS Text Preview / Edit</label>
+              <span className="text-[11px] text-gray-400 font-mono">{messageToSend.length} chars (1 SMS credit)</span>
+            </div>
+            {selectedStage === 'Custom' ? (
+              <textarea 
+                rows={3}
+                required
+                className="w-full border rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-blue-500 outline-none font-sans"
+                placeholder="Type your custom SMS message to the customer..."
+                value={customMsg}
+                onChange={e => setCustomMsg(e.target.value)}
+              />
+            ) : (
+              <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 text-gray-800 leading-relaxed font-mono text-[11px]">
+                {messageToSend}
+              </div>
+            )}
+          </div>
+
+          {/* Previous SMS History for this order if any */}
+          {order.smsNotifications && order.smsNotifications.length > 0 && (
+            <div className="border-t pt-3">
+              <span className="font-bold text-gray-500 block mb-2">Previous SMS Sent for this Order ({order.smsNotifications.length}):</span>
+              <div className="space-y-1.5 max-h-24 overflow-y-auto">
+                {order.smsNotifications.map((s, idx) => (
+                  <div key={idx} className="bg-gray-50 p-2 rounded text-[11px] flex justify-between items-center border">
+                    <div>
+                      <span className="font-bold text-blue-700 mr-1.5">[{s.stage}]</span>
+                      <span className="text-gray-600">{s.message.slice(0, 45)}...</span>
+                    </div>
+                    <span className="text-gray-400 font-mono shrink-0 ml-2">{new Date(s.sentAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
+            <button 
+              type="button" 
+              onClick={onClose} 
+              className="px-4 py-2 rounded-lg border text-gray-600 font-bold hover:bg-gray-50 transition"
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              disabled={isSending}
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg font-bold shadow flex items-center gap-1.5 transition"
+            >
+              <Send size={14} /> {isSending ? 'Sending SMS...' : 'Send SMS Now'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 export const Dashboard = () => {
   const { 
-    user, orders, products, users, invoiceSettings, purchaseOrders, paymentSettings, brandAssets, reviews,
+    user, orders, products, users, invoiceSettings, purchaseOrders, expenses, paymentSettings, brandAssets, reviews,
     updateInvoiceSettings, addUser, addOrder, addPurchaseOrder, receivePurchaseOrder, updatePurchaseOrderBill,
+    addExpense, deleteExpense, updateExpenseBill, updateOrderTracking,
     updatePaymentStatus, approveDistributor, updateOrderStatus, deleteOrder, deletePurchaseOrder,
     addProduct, deleteProduct, updateProduct, updateStock, updatePaymentSettings, updateBrandAssets,
     clearOnlineOrders, updateUserPassword, updateReview, deleteReview, addFakeReview,
-    coupons, addCoupon, updateCoupon, toggleCouponStatus, deleteCoupon
+    coupons, addCoupon, updateCoupon, toggleCouponStatus, deleteCoupon,
+    smsLogs, smsSettings, sendOrderSMS, updateSmsSettings
   } = useStore();
   
   const [activeTab, setActiveTab] = useState('OVERVIEW');
@@ -1039,6 +2345,104 @@ export const Dashboard = () => {
   const [editingReview, setEditingReview] = useState<Review | null>(null);
   const [showAddReview, setShowAddReview] = useState(false);
   const [viewingBillUrl, setViewingBillUrl] = useState<{ url: string; poNumber: string; supplierName: string } | null>(null);
+
+  // Live Tracking Modal State
+  const [activeTrackingOrder, setActiveTrackingOrder] = useState<Order | null>(null);
+
+  // Expense Management State
+  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
+  const [expenseSearch, setExpenseSearch] = useState('');
+  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState('ALL');
+  const [expenseStatusFilter, setExpenseStatusFilter] = useState('ALL');
+  const [expenseFromDate, setExpenseFromDate] = useState('');
+  const [expenseToDate, setExpenseToDate] = useState('');
+
+  const filteredExpenses = React.useMemo(() => {
+    return (expenses || []).filter(exp => {
+      if (expenseCategoryFilter !== 'ALL' && exp.category !== expenseCategoryFilter) {
+        return false;
+      }
+      if (expenseStatusFilter !== 'ALL' && exp.status !== expenseStatusFilter) {
+        return false;
+      }
+      if (expenseFromDate && exp.date < expenseFromDate) {
+        return false;
+      }
+      if (expenseToDate && exp.date > expenseToDate) {
+        return false;
+      }
+      if (expenseSearch.trim()) {
+        const q = expenseSearch.toLowerCase().trim();
+        const matchTitle = exp.title?.toLowerCase().includes(q);
+        const matchNo = exp.expenseNumber?.toLowerCase().includes(q);
+        const matchPayee = exp.paidTo?.toLowerCase().includes(q);
+        const matchBillRef = exp.billRefNumber?.toLowerCase().includes(q);
+        const matchNotes = exp.notes?.toLowerCase().includes(q);
+        if (!matchTitle && !matchNo && !matchPayee && !matchBillRef && !matchNotes) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [expenses, expenseCategoryFilter, expenseStatusFilter, expenseFromDate, expenseToDate, expenseSearch]);
+
+  const exportExpensesToCSV = () => {
+    if (filteredExpenses.length === 0) {
+      alert("No expense records found to export with current filters.");
+      return;
+    }
+    const headers = [
+      "Expense Number",
+      "Title / Description",
+      "Category",
+      "Amount (INR)",
+      "Date",
+      "Paid To / Vendor",
+      "Payment Method",
+      "Bill Ref Number",
+      "Status",
+      "Bill Document Attached",
+      "Notes"
+    ];
+
+    const rows = filteredExpenses.map(exp => [
+      `"${exp.expenseNumber || ''}"`,
+      `"${(exp.title || '').replace(/"/g, '""')}"`,
+      `"${exp.category || ''}"`,
+      `"${exp.amount || 0}"`,
+      `"${exp.date || ''}"`,
+      `"${(exp.paidTo || '').replace(/"/g, '""')}"`,
+      `"${exp.paymentMethod || ''}"`,
+      `"${exp.billRefNumber || ''}"`,
+      `"${exp.status || ''}"`,
+      `"${exp.billUrl ? 'Yes' : 'No'}"`,
+      `"${(exp.notes || '').replace(/"/g, '""')}"`
+    ]);
+
+    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Expenses_Report_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // SMS Management State
+  const [smsOrderModal, setSmsOrderModal] = useState<Order | null>(null);
+  const [smsSearch, setSmsSearch] = useState('');
+  const [smsStageFilter, setSmsStageFilter] = useState('ALL');
+  const [smsStatusFilter, setSmsStatusFilter] = useState('ALL');
+  const [quickSmsPhone, setQuickSmsPhone] = useState('');
+  const [quickSmsName, setQuickSmsName] = useState('');
+  const [quickSmsOrderRef, setQuickSmsOrderRef] = useState('');
+  const [quickSmsStage, setQuickSmsStage] = useState<'Order Placed' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled' | 'Custom'>('Order Placed');
+  const [quickSmsMsg, setQuickSmsMsg] = useState('');
+  const [quickSmsSending, setQuickSmsSending] = useState(false);
+  const [smsGatewaySettings, setSmsGatewaySettings] = useState<SMSProviderSettings>(smsSettings);
+  const [smsSaveSuccess, setSmsSaveSuccess] = useState(false);
 
   // Purchase Order Filtering & Export State
   const [poSupplierFilter, setPoSupplierFilter] = useState('');
@@ -1273,7 +2677,7 @@ export const Dashboard = () => {
        { name: 'Cash on Delivery', value: codTotalCaptured, color: '#eab308' }
     ];
 
-    const TABS = ['OVERVIEW', 'REPORTS', 'PAYMENTS', 'COUPONS', 'ORDERS', 'PURCHASE', 'INVENTORY', 'PRODUCTS', 'USERS', 'REVIEWS', 'SETTINGS'];
+    const TABS = ['OVERVIEW', 'REPORTS', 'PAYMENTS', 'COUPONS', 'ORDERS', 'EXPENSES', 'PURCHASE', 'SMS ALERTS', 'INVENTORY', 'PRODUCTS', 'USERS', 'REVIEWS', 'SETTINGS'];
 
     return (
       <div className="container mx-auto px-4 py-8">
@@ -2011,34 +3415,6 @@ export const Dashboard = () => {
             })()}
           </div>
         )}
-        {activeTab === 'PURCHASE' && (
-            <div className="animate-fade-in">
-                 <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-bold text-xl text-gray-700">Purchase Orders</h3>
-                    <div className="flex gap-2">
-                        <button onClick={() => setShowPOForm(true)} className="bg-tea-dark text-white px-4 py-2 rounded font-bold shadow flex items-center gap-2 hover:bg-black">
-                            <PlusCircle size={20} /> New PO
-                        </button>
-                    </div>
-                 </div>
-                 <div className="bg-white shadow rounded-lg p-4">
-                    {purchaseOrders.map(po => (
-                        <div key={po.id} className="border-b py-4 last:border-b-0 flex justify-between items-center">
-                            <div>
-                                <h4 className="font-bold">{po.supplierName}</h4>
-                                <span className="text-xs text-gray-500">{po.poNumber} | {po.date}</span>
-                            </div>
-                            <div className="flex items-center gap-4">
-                                <span className="font-bold">₹{po.totalAmount}</span>
-                                <span className={`px-2 py-1 rounded text-xs ${po.status === 'Received' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{po.status}</span>
-                                {po.status === 'Pending' && <button onClick={() => receivePurchaseOrder(po.id)} className="text-blue-600 text-sm underline">Receive</button>}
-                                <button onClick={() => deletePurchaseOrder(po.id)} className="text-red-600"><Trash2 size={16} /></button>
-                            </div>
-                        </div>
-                    ))}
-                 </div>
-            </div>
-        )}
 
         {activeTab === 'ORDERS' && (
              <div className="animate-fade-in space-y-4">
@@ -2138,6 +3514,14 @@ export const Dashboard = () => {
                                  </select>
 
                                  <button 
+                                   onClick={() => setActiveTrackingOrder(order)} 
+                                   className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                                   title="Manage Delivery Partner & Live Tracking"
+                                 >
+                                   <Truck size={14} className="text-blue-600" /> {order.trackingNumber ? 'Live Track' : 'Add Tracking'}
+                                 </button>
+
+                                 <button 
                                    onClick={() => setViewInvoice(order)} 
                                    className="bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 border"
                                    title="View & Print Invoice"
@@ -2156,10 +3540,29 @@ export const Dashboard = () => {
                              </div>
                            </div>
 
+                           {/* Tracking Summary Banner if Assigned */}
+                           {(order.trackingNumber || order.courierName) && (
+                             <div className="bg-blue-50/70 border border-blue-200 rounded-lg p-2.5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs">
+                               <div className="flex items-center gap-2">
+                                 <Truck size={16} className="text-blue-600 shrink-0" />
+                                 <div>
+                                   <span className="font-bold text-blue-950">{order.courierName || 'Courier Partner'}</span>
+                                   <span className="text-blue-800 font-mono ml-2 font-bold bg-blue-100 px-2 py-0.5 rounded border border-blue-300">AWB: {order.trackingNumber}</span>
+                                 </div>
+                               </div>
+                               <button
+                                 onClick={() => setActiveTrackingOrder(order)}
+                                 className="text-blue-700 hover:text-blue-900 font-bold flex items-center gap-1 text-[11px] underline shrink-0"
+                               >
+                                 <Activity size={13} /> Update / Track Online
+                               </button>
+                             </div>
+                           )}
+
                            {/* Bottom Bar: Meta info & Items ordered */}
                            <div className="pt-1 flex flex-col md:flex-row md:items-center justify-between gap-2 text-xs text-gray-500">
                              <div className="flex items-center gap-2 flex-wrap">
-                               <span className="font-mono bg-gray-100 px-2 py-0.5 rounded font-semibold text-gray-700">ID: {order.id}</span>
+                               <span className="font-mono bg-gray-100 px-2 py-0.5 rounded font-semibold text-gray-700">ID: {order.displayId || formatOrderId(order.id)}</span>
                                <span>•</span>
                                <span>Date: {order.date}</span>
                                {order.invoiceNumber && (
@@ -2192,6 +3595,23 @@ export const Dashboard = () => {
                    </div>
                  )}
              </div>
+        )}
+
+        {/* EXPENSES MANAGEMENT TAB */}
+        {activeTab === 'EXPENSES' && (
+          <ExpensesTab 
+            expenses={expenses}
+            onAddExpense={() => {
+              setEditingExpense(null);
+              setShowExpenseForm(true);
+            }}
+            onEditExpense={(exp) => {
+              setEditingExpense(exp);
+              setShowExpenseForm(true);
+            }}
+            onDeleteExpense={deleteExpense}
+            onViewBill={setViewingBillUrl}
+          />
         )}
 
          {activeTab === 'PURCHASE' && (
@@ -2977,6 +4397,79 @@ export const Dashboard = () => {
           <InvoiceTemplate order={viewInvoice} onClose={() => setViewInvoice(null)} />
         )}
 
+        {/* Live Tracking Modal */}
+        {activeTrackingOrder && (
+          <LiveTrackingModal 
+            order={activeTrackingOrder}
+            onClose={() => setActiveTrackingOrder(null)}
+            onUpdateTracking={updateOrderTracking}
+            isAdmin={true}
+          />
+        )}
+
+        {/* Expense Record Modal */}
+        {showExpenseForm && (
+          <ExpenseRecordForm 
+            expense={editingExpense}
+            onClose={() => {
+              setShowExpenseForm(false);
+              setEditingExpense(null);
+            }}
+            onSubmit={(exp) => {
+              addExpense(exp);
+              setShowExpenseForm(false);
+              setEditingExpense(null);
+            }}
+          />
+        )}
+
+        {/* Bill Viewer Modal */}
+        {viewingBillUrl && (
+          <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-fade-in">
+              <div className="flex items-center justify-between p-4 border-b bg-gray-50">
+                <div className="flex items-center gap-2">
+                  <Receipt className="text-tea-dark" size={20} />
+                  <div>
+                    <h3 className="font-bold text-gray-900 text-sm">{viewingBillUrl.poNumber} - Attached Bill Document</h3>
+                    <p className="text-xs text-gray-500">{viewingBillUrl.supplierName}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a 
+                    href={viewingBillUrl.url} 
+                    download={'Bill_' + viewingBillUrl.poNumber + '.png'} 
+                    className="bg-tea-green hover:bg-tea-dark text-white px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1"
+                  >
+                    <Download size={14} /> Download
+                  </a>
+                  <button 
+                    onClick={() => setViewingBillUrl(null)} 
+                    className="text-gray-400 hover:text-gray-700 p-1.5 rounded-lg hover:bg-gray-200 transition"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+              <div className="p-4 overflow-y-auto flex-1 flex items-center justify-center bg-gray-900/5">
+                {viewingBillUrl.url.startsWith('data:image') || viewingBillUrl.url.match(/\.(jpeg|jpg|png|webp)/i) ? (
+                  <img 
+                    src={viewingBillUrl.url} 
+                    alt="Bill Document" 
+                    className="max-h-[70vh] object-contain rounded-lg shadow border bg-white" 
+                  />
+                ) : (
+                  <iframe 
+                    src={viewingBillUrl.url} 
+                    title="Bill PDF Viewer" 
+                    className="w-full h-[70vh] rounded border" 
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Coupon Form Modal */}
         {showCouponModal && (
           <CouponFormModal 
@@ -3050,7 +4543,7 @@ export const Dashboard = () => {
                   <div className="flex flex-wrap justify-between items-start mb-4 border-b pb-3 gap-2">
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-lg">{order.id}</span>
+                        <span className="font-mono font-bold text-lg text-tea-dark">{order.displayId || formatOrderId(order.id)}</span>
                         {order.invoiceNumber && <span className="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600">Inv: {order.invoiceNumber}</span>}
                       </div>
                       <span className="text-gray-500 text-xs">{order.date}</span>
@@ -3058,7 +4551,8 @@ export const Dashboard = () => {
                     <div className="flex flex-col items-end gap-1">
                       <span className={`px-3 py-1 rounded-full text-xs font-bold ${
                         order.status === 'Delivered' ? 'bg-green-100 text-green-800' : 
-                        order.status === 'Processing' ? 'bg-blue-100 text-blue-800' :
+                        order.status === 'Shipped' ? 'bg-blue-100 text-blue-800' :
+                        order.status === 'Processing' ? 'bg-amber-100 text-amber-800' :
                         'bg-gray-100 text-gray-800'
                       }`}>
                         {order.status}
@@ -3092,6 +4586,55 @@ export const Dashboard = () => {
                       </div>
                     ))}
                   </div>
+
+                  {/* Customer Tracking Box */}
+                  {(order.trackingNumber || order.courierName || order.status === 'Shipped' || order.status === 'Delivered') && (
+                    <div className="mb-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shadow-xs">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-blue-600 text-white p-2.5 rounded-xl shrink-0 shadow-xs">
+                          <Truck size={20} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-extrabold text-xs text-blue-950">
+                              {order.courierName || 'Amrit Assam Logistics Carrier'}
+                            </span>
+                            {order.trackingNumber && (
+                              <span className="font-mono text-xs font-black bg-blue-100 text-blue-900 px-2 py-0.5 rounded border border-blue-300">
+                                AWB: {order.trackingNumber}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-blue-700 mt-0.5 font-medium">
+                            {order.status === 'Delivered' 
+                              ? 'Delivered to your address' 
+                              : order.status === 'Shipped' 
+                              ? 'In Transit - Out for delivery by courier' 
+                              : 'Order processed and packaged for dispatch'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap shrink-0">
+                        {order.trackingUrl && (
+                          <a
+                            href={order.trackingUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="bg-white hover:bg-gray-100 text-blue-900 border border-blue-300 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                          >
+                            <ExternalLink size={13} /> Track on Portal
+                          </a>
+                        )}
+                        <button
+                          onClick={() => setActiveTrackingOrder(order)}
+                          className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                        >
+                          <Activity size={14} /> Live Tracking
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="bg-gray-50 -mx-5 -mb-5 p-4 rounded-b-lg flex flex-col sm:flex-row justify-between items-center gap-4 mt-4">
                     <div className="text-sm text-gray-500">
@@ -3137,6 +4680,21 @@ export const Dashboard = () => {
             </div>
         )}
       </div>
+
+      {/* Live Tracking Modal for Customer */}
+      {activeTrackingOrder && (
+        <LiveTrackingModal 
+          order={activeTrackingOrder} 
+          onClose={() => setActiveTrackingOrder(null)} 
+          onUpdateTracking={updateOrderTracking} 
+          isAdmin={false} 
+        />
+      )}
+
+      {/* Invoice Modal for Customer */}
+      {viewInvoice && (
+        <InvoiceTemplate order={viewInvoice} onClose={() => setViewInvoice(null)} />
+      )}
 
       {/* Password Modal - ADDED for Non-Admin view as well */}
       {passwordModalUser && (

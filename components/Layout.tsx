@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../services/store';
-import { ShoppingCart, Menu, X, Phone, User as UserIcon, LogOut, Package, Coffee } from 'lucide-react';
+import { ShoppingCart, Menu, X, Phone, User as UserIcon, LogOut, Package, Coffee, Truck } from 'lucide-react';
 
 export const Header = ({ onNavigate, onOpenCart }: { onNavigate: (page: string) => void, onOpenCart: () => void }) => {
   const { user, cart, logout, brandAssets } = useStore();
@@ -38,6 +38,9 @@ export const Header = ({ onNavigate, onOpenCart }: { onNavigate: (page: string) 
         <nav className="hidden md:flex items-center space-x-6 text-white text-sm font-medium">
           <button onClick={() => handleNav('HOME')} className="hover:text-tea-gold transition">Home</button>
           <button onClick={() => handleNav('SHOP')} className="hover:text-tea-gold transition">Shop Now</button>
+          <button onClick={() => handleNav('TRACK_ORDER')} className="hover:text-tea-gold transition flex items-center gap-1.5 bg-white/10 hover:bg-white/20 px-3 py-1 rounded-full border border-white/20">
+            <Truck size={15} /> Track Order
+          </button>
           <button onClick={() => handleNav('DISTRIBUTOR_INFO')} className="hover:text-tea-gold transition">Distributors</button>
           
           {user ? (
@@ -86,6 +89,9 @@ export const Header = ({ onNavigate, onOpenCart }: { onNavigate: (page: string) 
         <div className="md:hidden bg-tea-dark text-white p-4 space-y-4">
           <button onClick={() => handleNav('HOME')} className="block w-full text-left py-2 border-b border-white/10">Home</button>
           <button onClick={() => handleNav('SHOP')} className="block w-full text-left py-2 border-b border-white/10">Shop Tea</button>
+          <button onClick={() => handleNav('TRACK_ORDER')} className="block w-full text-left py-2 border-b border-white/10 text-tea-gold font-bold flex items-center gap-2">
+            <Truck size={18} /> Track Courier / Order
+          </button>
           <button onClick={() => handleNav('DISTRIBUTOR_INFO')} className="block w-full text-left py-2 border-b border-white/10">Become Distributor</button>
           
           {user ? (
@@ -132,6 +138,7 @@ export const Footer = ({ onNavigate }: { onNavigate: (page: string) => void }) =
         <h3 className="text-tea-gold font-bold mb-4">Quick Links</h3>
         <ul className="space-y-2 text-sm text-gray-300">
           <li><button onClick={() => onNavigate('SHOP')} className="hover:text-white">Shop Online</button></li>
+          <li><button onClick={() => onNavigate('TRACK_ORDER')} className="hover:text-white flex items-center gap-1.5 font-bold text-tea-gold">Track Order / Courier</button></li>
           <li><button onClick={() => onNavigate('DISTRIBUTOR_INFO')} className="hover:text-white">Distributor Enquiry</button></li>
           <li><button onClick={() => onNavigate('PRIVACY')} className="hover:text-white">Privacy Policy</button></li>
           <li><button onClick={() => onNavigate('TERMS')} className="hover:text-white">Terms & Conditions</button></li>

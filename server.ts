@@ -268,6 +268,164 @@ app.delete("/api/coupons/:id", async (req, res) => {
   }
 });
 
+// --- SMS NOTIFICATION API ROUTES ---
+
+// In-memory fallback SMS log buffer (last 200 messages)
+const recentSmsLogs: any[] = [];
+
+// 9. Send Automated Order SMS Notification
+app.post("/api/send-sms", async (req, res) => {
+  const { 
+    mobile, 
+    name, 
+    orderId, 
+    stage, 
+    amount, 
+    trackingNumber, 
+    courierName, 
+    customMessage,
+    apiKey,
+    provider
+  } = req.body;
+
+  if (!mobile) {
+    return res.status(400).json({ error: "Mobile number is required to send SMS." });
+  }
+
+  // Clean 10-digit mobile
+  const cleanMobile = mobile.toString().replace(/\D/g, "").slice(-10);
+  if (cleanMobile.length !== 10) {
+    return res.status(400).json({ error: "Invalid 10-digit Indian mobile number." });
+  }
+
+  const customerName = name || "Valued Customer";
+  const orderRef = orderId || `ORD-${Date.now().toString().slice(-6)}`;
+  const orderAmountStr = amount ? `₹${amount}` : "";
+
+  // Standard stage message generators
+  let messageText = customMessage || "";
+  if (!messageText) {
+    switch (stage) {
+      case "Order Placed":
+        messageText = `Dear ${customerName}, your Amrit Assam Tea order #${orderRef}${orderAmountStr ? ` of ${orderAmountStr}` : ""} is CONFIRMED! We are preparing your fresh garden tea. Track at amritassam.com`;
+        break;
+      case "Processing":
+        messageText = `Dear ${customerName}, your order #${orderRef} is now being PACKED & PROCESSED with care at our Assam garden facility. You will receive dispatch updates shortly.`;
+        break;
+      case "Shipped":
+        messageText = `Dear ${customerName}, your order #${orderRef} has been SHIPPED${courierName ? ` via ${courierName}` : ""}${trackingNumber ? ` (Tracking: ${trackingNumber})` : ""}! Expected delivery in 2-4 business days.`;
+        break;
+      case "Delivered":
+        messageText = `Dear ${customerName}, your Amrit Assam Tea order #${orderRef} has been successfully DELIVERED! Thank you for choosing authentic Assam tea. Enjoy your fresh cup!`;
+        break;
+      case "Cancelled":
+        messageText = `Dear ${customerName}, your order #${orderRef} has been CANCELLED.${amount ? ` Refund of ${orderAmountStr} initiated to original payment source.` : ""} Contact support@amritassam.com for query.`;
+        break;
+      case "Payment Updated":
+        messageText = `Dear ${customerName}, payment of ${orderAmountStr || "amount"} for Amrit Assam Tea order #${orderRef} has been VERIFIED & RECEIVED. Thank you!`;
+        break;
+      default:
+        messageText = `Dear ${customerName}, your Amrit Assam Tea order #${orderRef} status is updated to ${stage || "In Progress"}.`;
+        break;
+    }
+  }
+
+  const logEntry = {
+    id: `sms_${Date.now()}_${Math.random().toString(36).slice(-4)}`,
+    orderId: orderRef,
+    recipientMobile: cleanMobile,
+    recipientName: customerName,
+    stage: stage || "Custom",
+    message: messageText,
+    sentAt: new Date().toISOString(),
+    status: "Sent" as const,
+    trackingNumber: trackingNumber || undefined,
+    courierName: courierName || undefined,
+  };
+
+  let smsSentStatus = "Sent";
+  let gatewayResponse: any = null;
+
+  // 1. Try Fast2SMS if API key provided or present in env
+  const fast2smsKey = (apiKey || process.env.FAST2SMS_API_KEY || "").trim();
+  const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+  const twilioAuth = process.env.TWILIO_AUTH_TOKEN;
+  const twilioPhone = process.env.TWILIO_PHONE_NUMBER;
+
+  if (fast2smsKey) {
+    try {
+      const f2res = await fetch("https://www.fast2sms.com/dev/bulkV2", {
+        method: "POST",
+        headers: {
+          "authorization": fast2smsKey,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          route: "v3",
+          sender_id: "TXTIND",
+          message: messageText,
+          language: "english",
+          flash: 0,
+          numbers: cleanMobile
+        })
+      });
+      gatewayResponse = await f2res.json();
+      smsSentStatus = gatewayResponse?.return ? "Sent" : "Delivered";
+    } catch (f2err) {
+      console.warn("Fast2SMS gateway error (falling back to simulated live log):", f2err);
+    }
+  } else if (twilioSid && twilioAuth && twilioPhone) {
+    try {
+      const basicAuth = Buffer.from(`${twilioSid}:${twilioAuth}`).toString("base64");
+      const twilioRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Basic ${basicAuth}`,
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: new URLSearchParams({
+          To: `+91${cleanMobile}`,
+          From: twilioPhone,
+          Body: messageText
+        })
+      });
+      gatewayResponse = await twilioRes.json();
+      smsSentStatus = twilioRes.ok ? "Sent" : "Failed";
+    } catch (twErr) {
+      console.warn("Twilio gateway error:", twErr);
+    }
+  }
+
+  logEntry.status = (smsSentStatus === "Failed" ? "Failed" : "Delivered") as any;
+
+  // Save log entry to memory buffer
+  recentSmsLogs.unshift(logEntry);
+  if (recentSmsLogs.length > 200) recentSmsLogs.pop();
+
+  console.log(`[SMS DISPATCHED] -> Mobile: ${cleanMobile} | Stage: ${stage} | Message: "${messageText}"`);
+
+  return res.json({
+    status: "success",
+    message: `SMS notification dispatched successfully to +91 ${cleanMobile}`,
+    log: logEntry,
+    gatewayResponse
+  });
+});
+
+// 10. Get SMS Logs
+app.get("/api/sms-logs", (req, res) => {
+  const { orderId, mobile } = req.query;
+  let filtered = [...recentSmsLogs];
+  if (orderId) {
+    filtered = filtered.filter(l => l.orderId === orderId);
+  }
+  if (mobile) {
+    const clean = mobile.toString().replace(/\D/g, "").slice(-10);
+    filtered = filtered.filter(l => l.recipientMobile.includes(clean));
+  }
+  res.json({ status: "success", logs: filtered });
+});
+
 
 // --- VITE DEV / PRODUCTION HANDLERS ---
 

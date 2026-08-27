@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User, Product, CartItem, Order, Role, InvoiceSettings, PurchaseOrder, PaymentSettings, Review, BrandAssets, Coupon } from '../types';
+import { User, Product, CartItem, Order, Role, InvoiceSettings, PurchaseOrder, PaymentSettings, Review, BrandAssets, Coupon, SMSNotification, SMSProviderSettings, ExpenseRecord, formatOrderId } from '../types';
 import { PRODUCTS, MOCK_USERS } from '../constants';
 import { supabase } from './supabase';
 
@@ -8,10 +8,13 @@ interface StoreContextType {
   products: Product[];
   orders: Order[];
   purchaseOrders: PurchaseOrder[];
+  expenses: ExpenseRecord[];
   cart: CartItem[];
   users: User[]; 
   reviews: Review[];
   coupons: Coupon[];
+  smsLogs: SMSNotification[];
+  smsSettings: SMSProviderSettings;
   invoiceSettings: InvoiceSettings;
   paymentSettings: PaymentSettings;
   brandAssets: BrandAssets;
@@ -22,15 +25,22 @@ interface StoreContextType {
   addToCart: (product: Product, quantity: number) => void;
   removeFromCart: (productId: string) => void;
   clearCart: () => void;
-  placeOrder: (paymentMethod: 'UPI' | 'Card' | 'COD' | 'Cash' | 'MANUAL_UPI', address: string, paymentStatus?: 'Pending' | 'Paid', transactionId?: string, recipientDetails?: { name?: string; mobile?: string }, couponInfo?: { code: string; discountAmount: number }) => Promise<void>;
+  placeOrder: (paymentMethod: 'UPI' | 'Card' | 'COD' | 'Cash' | 'MANUAL_UPI' | 'Complimentary' | 'Waived', address: string, paymentStatus?: 'Pending' | 'Paid', transactionId?: string, recipientDetails?: { name?: string; mobile?: string }, couponInfo?: { code: string; discountAmount: number }) => Promise<void>;
   deleteOrder: (orderId: string) => Promise<void>;
   addOrder: (order: Order) => Promise<void>; 
   addPurchaseOrder: (po: PurchaseOrder) => Promise<void>;
   deletePurchaseOrder: (poId: string) => Promise<void>;
   receivePurchaseOrder: (poId: string) => Promise<void>;
   updatePurchaseOrderBill: (poId: string, billUrl: string) => Promise<void>;
-  updateOrderStatus: (orderId: string, status: Order['status']) => Promise<void>;
+  addExpense: (expense: ExpenseRecord) => Promise<void>;
+  deleteExpense: (expenseId: string) => Promise<void>;
+  updateExpenseBill: (expenseId: string, billUrl: string) => Promise<void>;
+  updateOrderTracking: (orderId: string, trackingNumber: string, courierName: string, trackingUrl?: string) => Promise<void>;
+  updateOrderStatus: (orderId: string, status: Order['status'], trackingNumber?: string, courierName?: string, customNote?: string, trackingUrl?: string) => Promise<void>;
   updatePaymentStatus: (orderId: string, status: Order['paymentStatus']) => Promise<void>;
+  sendOrderSMS: (order: Order, stage: SMSNotification['stage'], trackingNumber?: string, courierName?: string, customNote?: string) => Promise<{ success: boolean; message: string; preview?: string }>;
+  updateSmsSettings: (settings: SMSProviderSettings) => void;
+  fetchSmsLogs: (orderId?: string) => Promise<void>;
   approveDistributor: (userId: string) => Promise<void>;
   updateProduct: (product: Product) => Promise<void>;
   deleteProduct: (productId: string) => Promise<void>;
@@ -131,6 +141,7 @@ const mapOrderFromDB = (o: any, items: any[] = [], availableProducts: Product[] 
 
   return {
     id: o.id,
+    displayId: formatOrderId(o.id),
     userId: o.user_id,
     userName: resolvedName || 'Customer',
     userMobile: resolvedMobile || '',
@@ -147,7 +158,12 @@ const mapOrderFromDB = (o: any, items: any[] = [], availableProducts: Product[] 
     type: o.order_type || 'RETAIL',
     invoiceNumber: o.invoice_number || `INV-${o.id.toString().slice(-6)}`,
     couponCode: o.coupon_code || undefined,
-    discountAmount: o.discount_amount ? Number(o.discount_amount) : undefined
+    discountAmount: o.discount_amount ? Number(o.discount_amount) : undefined,
+    trackingNumber: o.tracking_number || o.trackingNumber || undefined,
+    courierName: o.courier_name || o.courierName || undefined,
+    trackingUrl: o.tracking_url || o.trackingUrl || undefined,
+    orderSource: o.order_source || o.orderSource || 'ONLINE',
+    notes: o.notes || undefined
   };
 };
 
@@ -196,6 +212,51 @@ const DEFAULT_COUPONS: Coupon[] = [
   }
 ];
 
+const DEFAULT_EXPENSES: ExpenseRecord[] = [
+  {
+    id: 'exp-1',
+    expenseNumber: 'EXP-2026-001',
+    title: 'Warehouse & Godown Rent (Monthly)',
+    category: 'Rent & Premises',
+    amount: 25000,
+    date: new Date().toISOString().split('T')[0],
+    paidTo: 'APMC Logistics Estate',
+    paymentMethod: 'Bank Transfer',
+    billRefNumber: 'RENT/2026/04',
+    notes: 'APMC Vashi storage unit monthly rental payment',
+    status: 'Paid',
+    createdBy: 'Super Admin'
+  },
+  {
+    id: 'exp-2',
+    expenseNumber: 'EXP-2026-002',
+    title: 'Tea Pouch Outer Packaging Material (5000 units)',
+    category: 'Packaging & Materials',
+    amount: 14500,
+    date: new Date().toISOString().split('T')[0],
+    paidTo: 'Shree Balaji Packaging Pvt Ltd',
+    paymentMethod: 'UPI',
+    billRefNumber: 'INV-PKG-889',
+    notes: 'Premium gold foil zipper pouch printing & lamination',
+    status: 'Paid',
+    createdBy: 'Super Admin'
+  },
+  {
+    id: 'exp-3',
+    expenseNumber: 'EXP-2026-003',
+    title: 'Assam Tea Garden Logistics & Transport Freight',
+    category: 'Logistics & Freight',
+    amount: 8200,
+    date: new Date().toISOString().split('T')[0],
+    paidTo: 'North East Cargo Express',
+    paymentMethod: 'Cash',
+    billRefNumber: 'LR-99238',
+    notes: 'Direct bulk freight from Dibrugarh hub to warehouse',
+    status: 'Paid',
+    createdBy: 'Super Admin'
+  }
+];
+
 // --- DEFAULTS ---
 
 const DEFAULT_INVOICE_SETTINGS: InvoiceSettings = {
@@ -217,6 +278,13 @@ const DEFAULT_BRAND_ASSETS: BrandAssets = {
   logo: null,
   heroImage: 'https://picsum.photos/seed/teafield/1600/900',
   featureImage: 'https://picsum.photos/seed/teamaking/600/400'
+};
+
+const DEFAULT_SMS_SETTINGS: SMSProviderSettings = {
+  enabled: true,
+  provider: 'SIMULATED',
+  fast2smsApiKey: '',
+  senderId: 'AMRITT'
 };
 
 const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutes in ms
@@ -248,6 +316,14 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
     }
   });
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseRecord[]>(() => {
+    try {
+      const cached = localStorage.getItem('amrit_assam_expenses');
+      return cached ? JSON.parse(cached) : DEFAULT_EXPENSES;
+    } catch {
+      return DEFAULT_EXPENSES;
+    }
+  });
   const [users, setUsers] = useState<User[]>([]); // Admin view of all users
   const [reviews, setReviews] = useState<Review[]>([]);
   const [coupons, setCoupons] = useState<Coupon[]>(() => {
@@ -258,11 +334,27 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
       return DEFAULT_COUPONS;
     }
   });
+  const [smsLogs, setSmsLogs] = useState<SMSNotification[]>(() => {
+    try {
+      const cached = localStorage.getItem('amrit_assam_sms_logs');
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
   
   // Settings State
   const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettings>(DEFAULT_INVOICE_SETTINGS);
   const [paymentSettings, setPaymentSettings] = useState<PaymentSettings>(DEFAULT_PAYMENT_SETTINGS);
   const [brandAssets, setBrandAssets] = useState<BrandAssets>(DEFAULT_BRAND_ASSETS);
+  const [smsSettings, setSmsSettings] = useState<SMSProviderSettings>(() => {
+    try {
+      const cached = localStorage.getItem('amrit_assam_sms_settings');
+      return cached ? JSON.parse(cached) : DEFAULT_SMS_SETTINGS;
+    } catch {
+      return DEFAULT_SMS_SETTINGS;
+    }
+  });
 
   const [cart, setCart] = useState<CartItem[]>([]);
 
@@ -838,17 +930,29 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
     }
     
     // Product MRP / Wholesale subtotal
+    const isDistributor = user.role === 'DISTRIBUTOR';
     const subtotal = cart.reduce((sum, item) => {
-      const price = user.role === 'DISTRIBUTOR' ? item.distributorPrice : item.mrp;
+      const price = isDistributor ? item.distributorPrice : item.mrp;
       return sum + (price * item.quantity);
     }, 0);
 
     const discountAmount = couponInfo?.discountAmount ? Math.min(couponInfo.discountAmount, subtotal) : 0;
-    const finalTotalAmount = Math.max(0, subtotal - discountAmount);
     
-    // Product MRP is inclusive of 5% GST (HSN 0902: 2.5% CGST + 2.5% SGST)
-    const taxableBase = finalTotalAmount / 1.05;
-    const taxAmount = finalTotalAmount - taxableBase;
+    let finalTotalAmount = 0;
+    let taxAmount = 0;
+    let taxableBase = 0;
+
+    if (isDistributor) {
+      // FOR DISTRIBUTORS / RETAILERS: GST IS EXCLUSIVE (5% GST added on top of wholesale rate)
+      taxableBase = Math.max(0, subtotal - discountAmount);
+      taxAmount = Math.round(taxableBase * 0.05 * 100) / 100;
+      finalTotalAmount = Math.round(taxableBase + taxAmount);
+    } else {
+      // FOR REGULAR USERS / RETAIL: GST IS INCLUDED in MRP
+      finalTotalAmount = Math.max(0, subtotal - discountAmount);
+      taxableBase = finalTotalAmount / 1.05;
+      taxAmount = Math.round((finalTotalAmount - taxableBase) * 100) / 100;
+    }
 
     const invoiceNum = `INV-${Date.now().toString().slice(-6)}`;
     const finalName = recipientDetails?.name ? `${recipientDetails.name} (by ${user.name})` : user.name;
@@ -870,7 +974,7 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
             payment_status: paymentStatus,
             transaction_id: transactionId || null,
             invoice_number: invoiceNum,
-            order_type: user.role === 'DISTRIBUTOR' ? 'WHOLESALE' : 'RETAIL',
+            order_type: isDistributor ? 'WHOLESALE' : 'RETAIL',
             shipping_address: finalAddress
         })
         .select()
@@ -883,8 +987,8 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
             order_id: orderData.id,
             product_id: item.id,
             quantity: item.quantity,
-            price_per_unit: user.role === 'DISTRIBUTOR' ? item.distributorPrice : item.mrp,
-            total_price: (user.role === 'DISTRIBUTOR' ? item.distributorPrice : item.mrp) * item.quantity
+            price_per_unit: isDistributor ? item.distributorPrice : item.mrp,
+            total_price: (isDistributor ? item.distributorPrice : item.mrp) * item.quantity
         }));
 
         await supabase.from('order_items').insert(orderItems);
@@ -907,6 +1011,7 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
     // Step 3: Create Full in-memory and cached Order Object
     const newOrderObj: Order = {
       id: createdOrderId,
+      displayId: formatOrderId(createdOrderId),
       userId: user.id,
       userName: finalName,
       userMobile: finalMobile,
@@ -920,10 +1025,11 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
       paymentStatus: paymentStatus,
       transactionId: transactionId || undefined,
       date: new Date().toISOString().split('T')[0],
-      type: user.role === 'DISTRIBUTOR' ? 'WHOLESALE' : 'RETAIL',
+      type: isDistributor ? 'WHOLESALE' : 'RETAIL',
       invoiceNumber: invoiceNum,
       couponCode: couponInfo?.code,
-      discountAmount: discountAmount > 0 ? discountAmount : undefined
+      discountAmount: discountAmount > 0 ? discountAmount : undefined,
+      smsNotifications: []
     };
 
     // Save in state & local backup cache immediately
@@ -934,6 +1040,9 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
       } catch (e) {}
       return updated;
     });
+
+    // Step 4: Automatically trigger SMS for Order Placed stage
+    sendOrderSMS(newOrderObj, 'Order Placed');
 
     clearCart();
     fetchOrders();
@@ -1196,7 +1305,225 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
      setPurchaseOrders(prev => prev.map(p => p.id === poId ? { ...p, billUrl } : p));
   };
 
-  const updateOrderStatus = async (orderId: string, status: Order['status']) => {
+  // --- EXPENSE MANAGEMENT ---
+  const addExpense = async (expense: ExpenseRecord) => {
+    try {
+      const { data } = await supabase.from('expenses').insert({
+        expense_number: expense.expenseNumber,
+        title: expense.title,
+        category: expense.category,
+        amount: expense.amount,
+        date: expense.date,
+        paid_to: expense.paidTo,
+        payment_method: expense.paymentMethod,
+        bill_ref_number: expense.billRefNumber || null,
+        bill_url: expense.billUrl || null,
+        notes: expense.notes || null,
+        status: expense.status,
+        created_by: expense.createdBy || 'Super Admin'
+      }).select().single();
+
+      if (data) {
+        const newRec: ExpenseRecord = {
+          id: data.id.toString(),
+          expenseNumber: data.expense_number || expense.expenseNumber,
+          title: data.title || expense.title,
+          category: data.category || expense.category,
+          amount: Number(data.amount || expense.amount),
+          date: data.date || expense.date,
+          paidTo: data.paid_to || expense.paidTo,
+          paymentMethod: data.payment_method || expense.paymentMethod,
+          billRefNumber: data.bill_ref_number || expense.billRefNumber,
+          billUrl: data.bill_url || expense.billUrl,
+          notes: data.notes || expense.notes,
+          status: data.status || expense.status,
+          createdBy: data.created_by || expense.createdBy
+        };
+        setExpenses(prev => {
+          const updated = [newRec, ...prev.filter(e => e.id !== newRec.id)];
+          try { localStorage.setItem('amrit_assam_expenses', JSON.stringify(updated)); } catch (e) {}
+          return updated;
+        });
+        return;
+      }
+    } catch (e) {
+      console.warn("DB insert for expense failed, using persistent local store:", e);
+    }
+
+    setExpenses(prev => {
+      const updated = [expense, ...prev.filter(e => e.id !== expense.id)];
+      try { localStorage.setItem('amrit_assam_expenses', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
+  };
+
+  const deleteExpense = async (expenseId: string) => {
+    try {
+      await supabase.from('expenses').delete().eq('id', expenseId);
+    } catch (e) {
+      console.warn("Delete expense from DB error:", e);
+    }
+    setExpenses(prev => {
+      const updated = prev.filter(e => e.id !== expenseId);
+      try { localStorage.setItem('amrit_assam_expenses', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
+  };
+
+  const updateExpenseBill = async (expenseId: string, billUrl: string) => {
+    try {
+      await supabase.from('expenses').update({ bill_url: billUrl }).eq('id', expenseId);
+    } catch (e) {
+      console.warn("Update expense bill error:", e);
+    }
+    setExpenses(prev => {
+      const updated = prev.map(e => e.id === expenseId ? { ...e, billUrl } : e);
+      try { localStorage.setItem('amrit_assam_expenses', JSON.stringify(updated)); } catch (e) {}
+      return updated;
+    });
+  };
+
+  const updateOrderTracking = async (
+    orderId: string, 
+    trackingNumber: string, 
+    courierName: string, 
+    trackingUrl?: string
+  ) => {
+    try {
+      await supabase.from('orders').update({
+        tracking_number: trackingNumber,
+        courier_name: courierName,
+        tracking_url: trackingUrl || null
+      }).eq('id', orderId);
+    } catch (e) {
+      console.warn("Update order tracking in DB error:", e);
+    }
+
+    let updatedOrderObj: Order | undefined;
+    setOrders(prev => {
+      const updated = prev.map(o => {
+        if (o.id === orderId) {
+          const updatedOrder: Order = {
+            ...o,
+            trackingNumber,
+            courierName,
+            trackingUrl: trackingUrl || o.trackingUrl
+          };
+          updatedOrderObj = updatedOrder;
+          return updatedOrder;
+        }
+        return o;
+      });
+      try { localStorage.setItem('amrit_assam_orders_cache', JSON.stringify(updated.slice(0, 100))); } catch (e) {}
+      return updated;
+    });
+
+    if (updatedOrderObj) {
+      sendOrderSMS(updatedOrderObj, 'Shipped', trackingNumber, courierName);
+    }
+  };
+
+  // --- SMS NOTIFICATION DISPATCH ENGINE ---
+  const sendOrderSMS = async (
+    targetOrder: Order, 
+    stage: SMSNotification['stage'],
+    trackingNumber?: string, 
+    courierName?: string, 
+    customNote?: string
+  ): Promise<{ success: boolean; message: string; preview?: string }> => {
+    try {
+      const recipientMobile = targetOrder.userMobile || users.find(u => u.id === targetOrder.userId)?.mobile || user?.mobile || '';
+      const recipientName = targetOrder.userName || users.find(u => u.id === targetOrder.userId)?.name || user?.name || 'Customer';
+
+      if (!recipientMobile) {
+        return { success: false, message: 'No mobile number found for order.' };
+      }
+
+      const res = await fetch('/api/send-sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mobile: recipientMobile,
+          name: recipientName,
+          orderId: targetOrder.displayId || formatOrderId(targetOrder.id) || targetOrder.invoiceNumber || targetOrder.id,
+          stage,
+          amount: targetOrder.totalAmount,
+          trackingNumber: trackingNumber || targetOrder.trackingNumber,
+          courierName: courierName || targetOrder.courierName,
+          customMessage: customNote,
+          apiKey: smsSettings.fast2smsApiKey,
+          provider: smsSettings.provider
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        if (data.log) {
+          setSmsLogs(prev => {
+            const updatedLogs = [data.log, ...prev.filter(l => l.id !== data.log.id)];
+            try {
+              localStorage.setItem('amrit_assam_sms_logs', JSON.stringify(updatedLogs.slice(0, 100)));
+            } catch (e) {}
+            return updatedLogs;
+          });
+
+          // Update order's smsNotifications & tracking info in state & cache
+          setOrders(prev => {
+            const updated = prev.map(o => {
+              if (o.id === targetOrder.id) {
+                const currentLogs = o.smsNotifications || [];
+                return {
+                  ...o,
+                  trackingNumber: trackingNumber || o.trackingNumber,
+                  courierName: courierName || o.courierName,
+                  smsNotifications: [data.log, ...currentLogs.filter(cl => cl.id !== data.log.id)]
+                };
+              }
+              return o;
+            });
+            try {
+              localStorage.setItem('amrit_assam_orders_cache', JSON.stringify(updated.slice(0, 100)));
+            } catch (e) {}
+            return updated;
+          });
+        }
+        return { success: true, message: data.message || 'SMS sent successfully', preview: data.log?.message };
+      }
+      return { success: false, message: data.error || 'Failed to dispatch SMS' };
+    } catch (err: any) {
+      console.warn('sendOrderSMS notice:', err);
+      return { success: false, message: err.message || 'Network error while sending SMS' };
+    }
+  };
+
+  const updateSmsSettings = (newSettings: SMSProviderSettings) => {
+    setSmsSettings(newSettings);
+    try {
+      localStorage.setItem('amrit_assam_sms_settings', JSON.stringify(newSettings));
+    } catch (e) {}
+  };
+
+  const fetchSmsLogs = async (orderId?: string) => {
+    try {
+      const url = orderId ? `/api/sms-logs?orderId=${encodeURIComponent(orderId)}` : '/api/sms-logs';
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.logs && Array.isArray(data.logs)) {
+          setSmsLogs(data.logs);
+        }
+      }
+    } catch (e) {}
+  };
+
+  const updateOrderStatus = async (
+    orderId: string, 
+    status: Order['status'], 
+    trackingNumber?: string, 
+    courierName?: string, 
+    customNote?: string,
+    trackingUrl?: string
+  ) => {
     const targetOrder = orders.find(o => o.id === orderId);
 
     if (status === 'Cancelled' && targetOrder && targetOrder.status !== 'Cancelled') {
@@ -1247,19 +1574,80 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
       }
 
       await supabase.from('orders').update({ status, payment_status: newPaymentStatus }).eq('id', orderId);
-      setOrders(orders.map(o => o.id === orderId ? { ...o, status, paymentStatus: newPaymentStatus } : o));
+      
+      const updatedOrder = { 
+        ...targetOrder, 
+        status, 
+        paymentStatus: newPaymentStatus,
+        trackingNumber: trackingNumber || targetOrder.trackingNumber,
+        courierName: courierName || targetOrder.courierName,
+        trackingUrl: trackingUrl || targetOrder.trackingUrl
+      };
 
-      alert(`Order set to Cancelled!${refundMsg ? '\n\n' + refundMsg : ''}\nStock restored for ordered items.`);
+      setOrders(orders.map(o => o.id === orderId ? updatedOrder : o));
+
+      // Trigger Cancelled stage SMS
+      sendOrderSMS(updatedOrder, 'Cancelled', trackingNumber, courierName, customNote);
+
+      alert(`Order set to Cancelled!${refundMsg ? '\n\n' + refundMsg : ''}\nStock restored and cancellation SMS dispatched.`);
       return;
     }
 
-    await supabase.from('orders').update({ status }).eq('id', orderId);
-    setOrders(orders.map(o => o.id === orderId ? { ...o, status } : o));
+    // Standard Status Update (Processing, Shipped, Delivered)
+    const updatePayload: any = { status };
+    if (trackingNumber) updatePayload.tracking_number = trackingNumber;
+    if (courierName) updatePayload.courier_name = courierName;
+    if (trackingUrl) updatePayload.tracking_url = trackingUrl;
+
+    try {
+      await supabase.from('orders').update(updatePayload).eq('id', orderId);
+    } catch (e) {
+      console.warn("DB update order status failed:", e);
+    }
+    
+    if (targetOrder) {
+      const updatedOrder: Order = {
+        ...targetOrder,
+        status,
+        trackingNumber: trackingNumber || targetOrder.trackingNumber,
+        courierName: courierName || targetOrder.courierName,
+        trackingUrl: trackingUrl || targetOrder.trackingUrl
+      };
+
+      setOrders(prev => {
+        const updated = prev.map(o => o.id === orderId ? updatedOrder : o);
+        try { localStorage.setItem('amrit_assam_orders_cache', JSON.stringify(updated.slice(0, 100))); } catch (e) {}
+        return updated;
+      });
+
+      // Automatically dispatch SMS for new stage!
+      const smsStage = status === 'Processing' ? 'Processing' 
+        : status === 'Shipped' ? 'Shipped' 
+        : status === 'Delivered' ? 'Delivered' 
+        : 'Processing';
+      
+      sendOrderSMS(updatedOrder, smsStage, trackingNumber, courierName, customNote);
+    } else {
+      setOrders(prev => {
+        const updated = prev.map(o => o.id === orderId ? { ...o, status } : o);
+        try { localStorage.setItem('amrit_assam_orders_cache', JSON.stringify(updated.slice(0, 100))); } catch (e) {}
+        return updated;
+      });
+    }
   };
 
   const updatePaymentStatus = async (orderId: string, status: Order['paymentStatus']) => {
     await supabase.from('orders').update({ payment_status: status }).eq('id', orderId);
-    setOrders(orders.map(o => o.id === orderId ? { ...o, paymentStatus: status } : o));
+    setOrders(orders.map(o => {
+      if (o.id === orderId) {
+        const updated = { ...o, paymentStatus: status };
+        if (status === 'Paid') {
+          sendOrderSMS(updated, 'Payment Updated');
+        }
+        return updated;
+      }
+      return o;
+    }));
   };
 
   const approveDistributor = async (userId: string) => {
@@ -1440,10 +1828,11 @@ export const StoreProvider = ({ children }: React.PropsWithChildren<{}>) => {
 
   return (
     <StoreContext.Provider value={{
-      user, products, orders, purchaseOrders, cart, users, reviews, coupons, invoiceSettings, paymentSettings, brandAssets,
+      user, products, orders, purchaseOrders, expenses, cart, users, reviews, coupons, smsLogs, smsSettings, invoiceSettings, paymentSettings, brandAssets,
       login, logout, register, addUser, addToCart, removeFromCart, clearCart,
       placeOrder, deleteOrder, addOrder, addPurchaseOrder, deletePurchaseOrder, receivePurchaseOrder, updatePurchaseOrderBill,
-      updateOrderStatus, updatePaymentStatus, approveDistributor, 
+      addExpense, deleteExpense, updateExpenseBill, updateOrderTracking,
+      updateOrderStatus, updatePaymentStatus, sendOrderSMS, updateSmsSettings, fetchSmsLogs, approveDistributor, 
       updateProduct, deleteProduct, addProduct, updateStock, updateInvoiceSettings, updatePaymentSettings, updateBrandAssets,
       addReview, updateReview, deleteReview, addFakeReview, fetchCoupons, addCoupon, updateCoupon, toggleCouponStatus, deleteCoupon, validateCoupon, clearOnlineOrders, updateUserPassword
     }}>

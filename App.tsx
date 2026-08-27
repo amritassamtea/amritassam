@@ -4,6 +4,7 @@ import { Header, Footer, WhatsAppFloat } from './components/Layout';
 import { Home } from './pages/Home';
 import { Dashboard } from './pages/Dashboard';
 import { ReviewModal } from './components/ReviewModal';
+import { TrackOrderPage } from './components/TrackOrderPage';
 import { ShoppingCart, Trash2, MessageSquare, Star, Tag, Percent, CheckCircle, X, Sparkles } from 'lucide-react';
 import { Product } from './types';
 
@@ -1190,6 +1191,7 @@ const MainContent = () => {
     switch (currentView) {
       case 'HOME': return <Home onNavigate={setCurrentView} />;
       case 'SHOP': return <ShopPage />;
+      case 'TRACK_ORDER': return <TrackOrderPage onNavigate={setCurrentView} />;
       case 'LOGIN': return <AuthPage onLoginSuccess={() => setCurrentView('HOME')} />;
       case 'DASHBOARD': return <Dashboard />;
       case 'CHECKOUT': return <CheckoutPage onOrderPlaced={() => setCurrentView('DASHBOARD')} />;

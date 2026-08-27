@@ -31,8 +31,32 @@ export interface CartItem extends Product {
   quantity: number;
 }
 
+export interface SMSNotification {
+  id: string;
+  orderId: string;
+  recipientMobile: string;
+  recipientName: string;
+  stage: 'Order Placed' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled' | 'Payment Updated' | 'Custom';
+  message: string;
+  sentAt: string;
+  status: 'Sent' | 'Delivered' | 'Simulated' | 'Failed';
+  trackingNumber?: string;
+  courierName?: string;
+}
+
+export interface SMSProviderSettings {
+  enabled: boolean;
+  provider: 'FAST2SMS' | 'TWILIO' | 'SIMULATED';
+  fast2smsApiKey?: string;
+  twilioAccountSid?: string;
+  twilioAuthToken?: string;
+  twilioPhoneNumber?: string;
+  senderId?: string;
+}
+
 export interface Order {
   id: string;
+  displayId?: string; // Human-readable unique format e.g. ORD-FA252361
   userId: string;
   userName: string;
   userMobile?: string;
@@ -40,9 +64,9 @@ export interface Order {
   userGst?: string;
   items: CartItem[];
   totalAmount: number;
-  taxAmount: number; // GST
+  taxAmount: number; // GST (5%)
   status: 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled';
-  paymentMethod: 'UPI' | 'Card' | 'COD' | 'Cash';
+  paymentMethod: 'UPI' | 'Card' | 'COD' | 'Cash' | 'Complimentary' | 'Waived';
   paymentStatus: 'Pending' | 'Paid' | 'Refunded';
   transactionId?: string; // Added for Razorpay Payment ID
   date: string;
@@ -50,6 +74,59 @@ export interface Order {
   invoiceNumber?: string;
   couponCode?: string;
   discountAmount?: number;
+  trackingNumber?: string;
+  courierName?: string;
+  trackingUrl?: string;
+  orderSource?: 'ONLINE' | 'MANUAL' | 'FRIEND_GIFT' | 'SAMPLE';
+  notes?: string;
+  smsNotifications?: SMSNotification[];
+}
+
+/**
+ * Transforms raw UUIDs (e.g., 'fa252361-d557-4bae-9132-92f2c60e47bf')
+ * or long numeric strings into a clean, human-readable, unique format like 'ORD-FA252361'.
+ */
+export const formatOrderId = (rawId?: string | null): string => {
+  if (!rawId) return 'ORD-000000';
+  const str = String(rawId).trim();
+  if (/^ORD-[A-Z0-9]{4,12}$/i.test(str)) {
+    return str.toUpperCase();
+  }
+  const clean = str.replace(/[^a-zA-Z0-9]/g, '');
+  if (clean.length >= 8) {
+    return `ORD-${clean.slice(0, 8).toUpperCase()}`;
+  }
+  return `ORD-${clean.toUpperCase()}`;
+};
+
+export type ExpenseCategory = 
+  | 'Rent & Premises'
+  | 'Electricity & Utilities'
+  | 'Packaging & Materials'
+  | 'Logistics & Freight'
+  | 'Salaries & Wages'
+  | 'Marketing & Ads'
+  | 'Samples & Tea Tasting'
+  | 'Printing & Stationery'
+  | 'Maintenance & Repairs'
+  | 'Tea Garden Sourcing'
+  | 'Legal & Accounting'
+  | 'Miscellaneous';
+
+export interface ExpenseRecord {
+  id: string;
+  expenseNumber: string; // e.g. EXP-2026-001
+  title: string;
+  category: ExpenseCategory;
+  amount: number;
+  date: string;
+  paidTo: string;
+  paymentMethod: 'Cash' | 'UPI' | 'Bank Transfer' | 'Card' | 'Cheque';
+  billRefNumber?: string;
+  billUrl?: string; // Uploaded invoice / bill photo / PDF
+  notes?: string;
+  status: 'Paid' | 'Pending';
+  createdBy?: string;
 }
 
 export interface PurchaseItem {
